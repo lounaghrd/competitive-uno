@@ -40,7 +40,7 @@ await ctx.setOffline(false);
 fs.writeFileSync(path.join(DIR,'index.html'),
   fs.readFileSync(path.join(DIR,'index.html'),'utf8').replace('var APP_VERSION = "'+v1+'"','var APP_VERSION = "TEST-NEXT"'));
 fs.writeFileSync(path.join(DIR,'sw.js'),
-  fs.readFileSync(path.join(DIR,'sw.js'),'utf8').replace('var CACHE = "uno-v3"','var CACHE = "uno-v99"'));
+  fs.readFileSync(path.join(DIR,'sw.js'),'utf8').replace(/var CACHE = "[^"]*"/, 'var CACHE = "uno-test-next"'));
 
 // --- one ordinary open is all the user does
 await page.goto('http://localhost:8098/index.html');

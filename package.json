@@ -4,7 +4,7 @@
   "description": "Score tracker for our road trip Uno league.",
   "scripts": {
     "serve": "node tests/serve.mjs",
-    "test": "node tests/test-logic.mjs && node tests/test-ui.mjs && node tests/test-import.mjs && node tests/test-update.mjs && node tests/test-sync.mjs",
+    "test": "node tests/test-logic.mjs && node tests/test-ui.mjs && node tests/test-import.mjs && node tests/test-update.mjs && node tests/test-sync.mjs && node tests/test-sessions.mjs",
     "icons": "node tests/icons.mjs"
   },
   "devDependencies": { "playwright": "^1.62.1" }

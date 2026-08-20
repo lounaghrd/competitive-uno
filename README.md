@@ -21,8 +21,9 @@ It works with no signal.
 5. **Chart** — everyone's total over time. Drag across it to read any moment.
 6. **Data** — export a spreadsheet of every game to dig for patterns later.
 
-Anything typed wrong can be fixed: tap any game in the session list to edit or
-delete it, and every total is recalculated from scratch.
+Anything typed wrong can be fixed. Tap a past session to open it: you can
+correct or delete any game inside it, or delete the whole session. Every total
+is recalculated from scratch, on every phone.
 
 ## House rules the app enforces
 

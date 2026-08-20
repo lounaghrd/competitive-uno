@@ -249,11 +249,11 @@ var P = {};
 PLAYERS.forEach(function(p){ p.age = THIS_YEAR - p.born; p.yearBonus = -10 * p.age; P[p.id] = p; });
 var IDS = PLAYERS.map(function(p){ return p.id; });
 var STORE = "uno-roadtrip-v1";
-var APP_VERSION = "2026-08-20d";
+var APP_VERSION = "2026-08-20e";
 
 /* ============================ state ============================ */
 var state = load();
-var ui = { tab:"board", editing:null, draftSeat:null, hidden:{}, scrub:null };
+var ui = { tab:"board", editing:null, draftSeat:null, hidden:{}, scrub:null, openSession:null };
 
 function blank(){ return { version:2, sessions:[], opening:{}, seeded:false, tombs:{} }; }
 
@@ -385,6 +385,16 @@ function mergeRemote(remote){
   lastSaved = JSON.parse(JSON.stringify(toRecords(state)));
   try { localStorage.setItem(STORE, JSON.stringify({ version:2, records:lastSaved })); } catch(e){}
   return true;
+}
+function plural(n, word){ return n + " " + word + (n === 1 ? "" : "s"); }
+function sessionById(id){
+  for(var i=0;i<state.sessions.length;i++) if(state.sessions[i].id === id) return state.sessions[i];
+  return null;
+}
+/* An edit can belong to the running session or to one being looked back at. */
+function editSession(){
+  if(ui.editing && ui.editing.sessionId) return sessionById(ui.editing.sessionId);
+  return curSession();
 }
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
 function curSession(){
@@ -683,14 +693,20 @@ function kpi(v,l){ return '<div class="kpi"><div class="v tnum">'+v+'</div><div 
 
 /* ---------- session ---------- */
 function viewSession(c, sess){
-  if(ui.editing) return viewGameEntry(c, sess);
+  if(ui.editing) return viewGameEntry(c, editSession() || sess);
+  if(ui.openSession){
+    var opened = sessionById(ui.openSession);
+    if(opened) return viewPastSession(c, opened);
+    ui.openSession = null;
+  }
 
   if(!sess){
-    var past = state.sessions.slice().reverse().slice(0,6).map(function(s){
+    var past = state.sessions.slice().reverse().map(function(s){
       var n = state.sessions.indexOf(s) + 1;
-      return '<div class="gm"><div class="idx">'+n+'</div>'
+      return '<button class="gm" data-act="open-session" data-s="'+s.id+'"><div class="idx">'+n+'</div>'
         + '<div><div class="t">'+(s.startedAt ? fmtDay(s.startedAt)+' · '+fmtTime(s.startedAt) : 'Date not recorded')+'</div>'
-        + '<div class="s">'+s.games.length+' games · '+(s.seating?s.seating.length:'?')+' players</div></div></div>';
+        + '<div class="s">'+plural(s.games.length,"game")+' · '+plural(s.seating?s.seating.length:0,"player")+'</div></div>'
+        + '<div class="chev">›</div></button>';
     }).join("");
     return '<div class="card"><div class="empty"><div class="big">🎬</div>'
       + '<b style="color:var(--text-secondary);display:block;margin-bottom:6px">No session running</b>'
@@ -703,20 +719,7 @@ function viewSession(c, sess){
   if(!sess.seating || sess.seating.length < 2) return viewSeating(sess);
 
   var starter = suggestStarter(sess.seating, c.totals);
-  var games = sess.games.slice().reverse().map(function(g){
-    var n = sess.games.indexOf(g) + 1;
-    var wid = winnerOf(g);
-    var cut = wid && g.entries[wid].kind === "cut";
-    var high = IDS.reduce(function(a,id){
-      var e = g.entries[id]; if(!e || e.kind !== "points") return a;
-      return (!a || e.points > a.points) ? { id:id, points:e.points } : a;
-    }, null);
-    return '<button class="gm" data-act="edit-game" data-g="'+g.id+'">'
-      + '<div class="idx">'+n+'</div>'
-      + '<div><div class="t">'+(wid ? esc(P[wid].name)+" won"+(cut?" ✂️":"") : "No winner")+'</div>'
-      + '<div class="s">'+fmtTime(g.startedAt)+(high?' · '+esc(P[high.id].name)+' took '+high.points:'')+'</div></div>'
-      + '<div class="chev">›</div></button>';
-  }).join("");
+  var games = gamesListHTML(sess);
 
   return '<div class="card" style="padding:14px 12px 18px">'
     + circleHTML(sess.seating, starter)
@@ -730,6 +733,47 @@ function viewSession(c, sess){
     + '<button class="btn ghost" data-act="end-session">End session</button>'
     + '</div>'
     + (games ? '<h2>This session ('+sess.games.length+')</h2><div class="card">'+games+'</div>' : '<div class="note">Nothing played yet this session.</div>');
+}
+
+function gamesListHTML(sess){
+  return sess.games.slice().reverse().map(function(g){
+    var n = sess.games.indexOf(g) + 1;
+    var wid = winnerOf(g);
+    var cut = wid && g.entries[wid].kind === "cut";
+    var high = IDS.reduce(function(a,id){
+      var e = g.entries[id]; if(!e || e.kind !== "points") return a;
+      return (!a || e.points > a.points) ? { id:id, points:e.points } : a;
+    }, null);
+    return '<button class="gm" data-act="edit-game" data-g="'+g.id+'">'
+      + '<div class="idx">'+n+'</div>'
+      + '<div><div class="t">'+(wid ? esc(P[wid].name)+" won"+(cut?" ✂️":"") : "No winner")+'</div>'
+      + '<div class="s">'+fmtTime(g.startedAt)+(high?' · '+esc(P[high.id].name)+' took '+high.points:'')+'</div></div>'
+      + '<div class="chev">›</div></button>';
+  }).join("");
+}
+
+/* Looking back at a finished session: what happened, and the way to remove it. */
+function viewPastSession(c, sess){
+  var n = state.sessions.indexOf(sess) + 1;
+  var when = sess.startedAt
+    ? fmtDay(sess.startedAt) + ' · ' + fmtTime(sess.startedAt)
+      + (sess.endedAt && fmtTime(sess.endedAt) !== fmtTime(sess.startedAt) ? '–' + fmtTime(sess.endedAt) : '')
+    : 'Date not recorded';
+  return '<button class="btn ghost" data-act="close-session" style="margin-bottom:14px">‹ All sessions</button>'
+    + '<h2>Session '+n+(sess.imported ? ' · from the spreadsheet' : '')+'</h2>'
+    + '<div class="card" style="padding:14px 12px 16px">'
+    + '<div style="text-align:center;font-weight:700;font-size:16px">'+when+'</div>'
+    + '<div style="text-align:center" class="note">'+plural(sess.games.length,"game")
+    + ' · '+plural(sess.seating ? sess.seating.length : 0,"player")+'</div>'
+    + (sess.seating ? circleHTML(sess.seating, null) : '')
+    + '</div>'
+    + (sess.games.length
+        ? '<h2>Games</h2><div class="card">'+gamesListHTML(sess)+'</div>'
+        : '<div class="note">No games were recorded in this session.</div>')
+    + '<h2>Remove it</h2>'
+    + '<button class="btn ghost danger" data-act="delete-session">Delete this whole session</button>'
+    + '<div class="note">This removes '+plural(sess.games.length,"game")
+    + ' from the league on every phone, and everyone\'s totals are worked out again without them.</div>';
 }
 
 function winnerOf(g){
@@ -1083,6 +1127,10 @@ function loadHistory(){
     sess.ord = si + 1;
     sess.games.forEach(function(g, gi){ g.ord = (si + 1) * 1000 + gi; });
   });
+  h.sessions.forEach(function(sess){
+    delete state.tombs[sess.id];
+    sess.games.forEach(function(g){ delete state.tombs[g.id]; });
+  });
   state.sessions = h.sessions.concat(state.sessions.filter(function(s){ return !s.imported; }));
   state.seeded = true;
   save();
@@ -1096,7 +1144,7 @@ function seedOnFirstRun(){
 /* ============================ actions ============================ */
 document.addEventListener("click", function(ev){
   var tab = ev.target.closest("[data-tab]");
-  if(tab){ ui.tab = tab.dataset.tab; ui.editing = null; render(); return; }
+  if(tab){ ui.tab = tab.dataset.tab; ui.editing = null; ui.openSession = null; render(); return; }
   var el = ev.target.closest("[data-act]");
   if(!el) return;
   var act = el.dataset.act;
@@ -1140,11 +1188,30 @@ document.addEventListener("click", function(ev){
     ui.editing = { game:sess.live, seating:sess.seating, isNew:true };
     ui.tab = "session"; render(); return;
   }
+  if(act === "open-session"){ ui.openSession = el.dataset.s; ui.tab = "session"; render(); return; }
+  if(act === "close-session"){ ui.openSession = null; render(); return; }
+  if(act === "delete-session"){
+    var target = sessionById(ui.openSession);
+    if(!target) return;
+    if(!confirm("Delete this whole session and its " + plural(target.games.length,"game")
+      + "? Everyone's totals are recalculated, on every phone.")) return;
+    var now = Date.now();
+    target.games.forEach(function(g){ state.tombs[g.id] = { kind:"game", at:now }; });
+    state.tombs[target.id] = { kind:"session", at:now };
+    state.sessions.splice(state.sessions.indexOf(target), 1);
+    ui.openSession = null; ui.editing = null;
+    save(); render();
+    toast("Session deleted");
+    return;
+  }
   if(act === "edit-game"){
+    var host = ui.openSession ? sessionById(ui.openSession) : sess;
+    if(!host) return;
     var gid = el.dataset.g;
-    var idx = sess.games.findIndex(function(g){ return g.id === gid; });
+    var idx = host.games.findIndex(function(g){ return g.id === gid; });
     if(idx < 0) return;
-    ui.editing = { game:JSON.parse(JSON.stringify(sess.games[idx])), seating:sess.seating, isNew:false, index:idx };
+    ui.editing = { game:JSON.parse(JSON.stringify(host.games[idx])), seating:host.seating,
+                   isNew:false, index:idx, sessionId:host.id };
     render(); return;
   }
   if(act === "set-win"){
@@ -1169,7 +1236,7 @@ document.addEventListener("click", function(ev){
   }
   if(act === "save-game"){ saveGame(); return; }
   if(act === "cancel-game"){
-    if(ui.editing.isNew){
+    if(ui.editing.isNew && sess){
       if(!confirm("Throw away this game?")) return;
       sess.live = false; save();
     }
@@ -1177,7 +1244,8 @@ document.addEventListener("click", function(ev){
   }
   if(act === "delete-game"){
     if(!confirm("Delete this game? Everyone's totals are recalculated.")) return;
-    var gone = sess.games.splice(ui.editing.index, 1)[0];
+    var owner = editSession(); if(!owner) return;
+    var gone = owner.games.splice(ui.editing.index, 1)[0];
     state.tombs[gone.id] = { kind:"game", at:Date.now() };
     ui.editing = null; save(); render(); toast("Game deleted"); return;
   }
@@ -1230,7 +1298,7 @@ function readInputs(){
 
 function saveGame(){
   readInputs();
-  var ed = ui.editing, g = ed.game, sess = curSession();
+  var ed = ui.editing, g = ed.game, sess = editSession();
   var wid = winnerOf(g);
   if(!wid){ toast("Tap 🏆 next to whoever went out"); return; }
   ed.seating.forEach(function(id){ if(!g.entries[id]) g.entries[id] = { kind:"points", points:0 }; });
