@@ -122,6 +122,21 @@ await D.evaluate(()=>window.Sync.pull()); await new Promise(r=>setTimeout(r,400)
 check(await D.evaluate(()=>window.compute().flat.length) === 104,
   `and that phone has the whole league straight away (${await D.evaluate(()=>window.compute().flat.length)})`);
 
+// whatever someone pastes into the box should work
+const cases = [
+  ['http://localhost:8097/leagues/roadtrip',                                    LEAGUE, 'the plain address'],
+  ['  http://localhost:8097/leagues/roadtrip/  ',                               LEAGUE, 'stray spaces and a trailing slash'],
+  ['http://localhost:8099/index.html?league=' + encodeURIComponent(LEAGUE),     LEAGUE, 'a full invite link pasted into the box'],
+  ['competitive-uno-default-rtdb.europe-west1.firebasedatabase.app/uno-roadtrip',
+   'https://competitive-uno-default-rtdb.europe-west1.firebasedatabase.app/uno-roadtrip',
+   'a missing https:// on a real Firebase address'],
+];
+for (const [input, want, label] of cases) {
+  const got = await A.p.evaluate(v=>window.Sync.normalise(v), input);
+  check(got === want, `accepts ${label}  ->  ${got}`);
+}
+check(await A.p.evaluate(()=>window.Sync.looksValid('hello world')) === false, 'rejects something that is not an address');
+
 if(errs.length){ fail++; console.log('FAIL  page errors: '+errs.join(' | ')); }
 await b.close(); DB.srv.close();
 console.log(fail?`\n${fail} FAILING`:'\nmulti-phone sync verified');

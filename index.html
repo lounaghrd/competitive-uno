@@ -422,8 +422,20 @@ var Sync = {
     if(Sync.url) Sync.connect();
   },
 
+  /* Accepts the database address or a full invite link, tidies both. */
+  normalise: function(raw){
+    var v = (raw || "").trim();
+    if(!v) return "";
+    var m = v.match(/[?&]league=([^&\s]+)/);
+    if(m) { try { v = decodeURIComponent(m[1]); } catch(e){ v = m[1]; } }
+    v = v.trim().replace(/\/+$/, "");
+    if(v && !/^https?:\/\//i.test(v)) v = "https://" + v;
+    return v;
+  },
+  looksValid: function(v){ return /^https?:\/\/[^\s/]+\.[^\s/]+/i.test(v); },
+
   setUrl: function(url){
-    url = (url || "").trim().replace(/\/+$/, "");
+    url = Sync.normalise(url);
     if(url) localStorage.setItem(SYNC_KEY, url); else localStorage.removeItem(SYNC_KEY);
     Sync.stop();
     Sync.url = url || null;
@@ -974,7 +986,7 @@ function viewData(c){
     + '<div class="note" style="margin-top:6px">'+st[1]
     + (queued ? ' <b>'+queued+' waiting to send.</b>' : '')+'</div>'
     + '<input class="urlin" id="syncurl" type="url" inputmode="url" autocapitalize="off" autocorrect="off"'
-    + ' placeholder="Paste the league address here" value="'+esc(Sync.url||"")+'">'
+    + ' placeholder="Paste the address or an invite link" value="'+esc(Sync.url||"")+'">'
     + (Sync.configured()
         ? '<button class="btn" style="margin-top:9px" data-act="sync-invite">Copy the invite link</button>'
           + '<div class="row2" style="margin-top:9px">'
@@ -1174,9 +1186,11 @@ document.addEventListener("click", function(ev){
     var p = el.dataset.p; ui.hidden[p] = !ui.hidden[p]; render(); return;
   }
   if(act === "sync-save"){
-    var v = document.getElementById("syncurl").value;
+    var raw = document.getElementById("syncurl").value;
+    var v = Sync.normalise(raw);
+    if(v && !Sync.looksValid(v)){ toast("That doesn't look like a web address"); return; }
     Sync.setUrl(v); render();
-    toast(v.trim() ? "Connecting to the shared league…" : "Sharing turned off");
+    toast(v ? "Connecting to the shared league…" : "Sharing turned off");
     return;
   }
   if(act === "sync-invite"){
