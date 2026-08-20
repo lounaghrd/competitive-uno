@@ -63,6 +63,16 @@ Every final total was checked against the spreadsheet's own numbers and matches
 exactly (`npm test`). `tools/build_history.py` regenerates `history.js` from
 `tools/uno-sheet-export.csv`.
 
+## Updates
+
+The app checks for a new version whenever it's opened and, if there is one,
+reloads itself once so you always see the current build — except while a game
+is being typed in, where it waits until you've saved. The version is shown at
+the bottom of the **Data** tab.
+
+When publishing a change, bump `CACHE` in `sw.js` and `APP_VERSION` in
+`index.html`; `tests/test-update.mjs` proves an installed copy picks it up.
+
 ## Where the scores live
 
 On the phone that entered them, in that browser. Nothing is uploaded and there
@@ -77,7 +87,8 @@ npm run serve     # http://localhost:8099
 npm test          # scoring rules + a full run through the app
 ```
 
-`npm test` runs three suites in a headless phone browser: the scoring rules
+`npm test` runs four suites in a headless phone browser: the scoring rules
 against hand-calculated values, a full run through the app (seating, entry,
 editing, export, reload, offline), and the spreadsheet import checked
-player-by-player against the sheet's own totals.
+player-by-player against the sheet's own totals, and a real
+install-then-publish cycle proving the app updates itself and keeps its data.

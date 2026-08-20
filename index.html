@@ -242,6 +242,7 @@ var P = {};
 PLAYERS.forEach(function(p){ p.age = THIS_YEAR - p.born; p.yearBonus = -10 * p.age; P[p.id] = p; });
 var IDS = PLAYERS.map(function(p){ return p.id; });
 var STORE = "uno-roadtrip-v1";
+var APP_VERSION = "2026-08-20d";
 
 /* ============================ state ============================ */
 var state = load();
@@ -740,7 +741,7 @@ function viewData(c){
     + '</span></div></div>'
     + '<h2>Danger zone</h2>'
     + '<button class="btn ghost danger" data-act="wipe">Erase everything ('+totalGames+' games)</button>'
-    + '<div class="note">Sessions: '+state.sessions.length+' · Games: '+totalGames+' · Saved on this phone only. Export a backup now and then.</div>';
+    + '<div class="note">Version '+APP_VERSION+' · Sessions: '+state.sessions.length+' · Games: '+totalGames+' · Saved on this phone only. Export a backup now and then.</div>';
 }
 
 /* ============================ CSV ============================ */
@@ -951,6 +952,7 @@ function saveGame(){
   render();
   if(msg) toast(msg, "bonus");
   else toast(ed.isNew ? (P[wid].name + " wins game " + c.flat.length) : "Game updated");
+  if(pendingUpdate){ pendingUpdate = false; setTimeout(function(){ location.reload(); }, 1200); }
 }
 
 /* keep typed values while re-rendering on blur */
@@ -1004,7 +1006,24 @@ seedOnFirstRun();
 
 render();
 
+/* When a new version of the app is published, the old cached copy is what
+   opens. Reload once as soon as the new one takes over — but never in the
+   middle of typing a game in, or the scores on screen would be lost. */
+var pendingUpdate = false;
+function onNewVersion(){
+  if(ui.editing){ pendingUpdate = true; toast("Update ready — it'll apply after you save"); return false; }
+  location.reload();
+  return true;
+}
 if("serviceWorker" in navigator){
+  var reloading = false;
+  /* On a first-ever visit the worker claims this page for the first time —
+     that is an install, not an update, and must not trigger a reload. */
+  var hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener("controllerchange", function(){
+    if(!hadController || reloading) return;
+    reloading = onNewVersion();
+  });
   window.addEventListener("load", function(){
     navigator.serviceWorker.register("sw.js").catch(function(){});
   });

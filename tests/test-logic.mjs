@@ -70,6 +70,17 @@ if (st[0]==='julia' && st[1]==='tom' && st[2]==='tom')
   console.log('ok    starter = highest total (last place), ties by seat order, only players at the table');
 else { fail++; console.log('FAIL  starter picking:', st); }
 
+// an update must never interrupt a game that is being typed in
+const upd = await page.evaluate(()=>{
+  const before = window.location.href;
+  window.ui.editing = { game:{entries:{}}, seating:['andy'], isNew:true };
+  const reloaded = window.onNewVersion();          // returns false = deferred
+  window.ui.editing = null;
+  return { reloaded, stillHere: window.location.href === before };
+});
+if (upd.reloaded === false && upd.stillHere) console.log('ok    an app update waits until the game in progress is saved');
+else { fail++; console.log('FAIL  update interrupted a game in progress', upd); }
+
 if (errs.length) { fail++; console.log('FAIL  page errors:', errs); }
 await b.close();
 console.log(fail ? `\n${fail} FAILING` : '\nall logic checks pass');
