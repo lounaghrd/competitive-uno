@@ -7,15 +7,19 @@ def num(s):
     if s=='' or s.startswith('#'): return None
     return int(float(s))
 
-G=[]
+# Walk every row, including the manual -200 adjustment row, so that the
+# standings carried into each game are the sheet's own numbers.
+G=[]; standing={p:None for p in P}
 for r in rows[1:]:
     r=r+['']*30
-    if not r[0].strip(): continue
     raw={P[i]:num(r[2+i]) for i in range(7)}
-    if all(v is None for v in raw.values()): continue
-    G.append(dict(no=int(r[0]), ts=r[1].strip(), raw=raw,
-        cum={P[i]:num(r[13+i]) for i in range(7)},
-        order={P[i]:num(r[22+i]) for i in range(7)}))
+    cum={P[i]:num(r[13+i]) for i in range(7)}
+    if r[0].strip() and not all(v is None for v in raw.values()):
+        G.append(dict(no=int(r[0]), ts=r[1].strip(), raw=raw, cum=cum,
+            before=dict(standing),
+            order={P[i]:num(r[22+i]) for i in range(7)}))
+    for p in P:
+        if cum[p] is not None: standing[p]=cum[p]
 
 # CEST (UTC+2) in August; the sheet's clock is local French time
 def epoch(ts):
@@ -74,8 +78,17 @@ for i,s in enumerate(sessions):
             if v==-10:   entries[pid[p]]={"kind":"win","points":None}
             elif v==-20: entries[pid[p]]={"kind":"cut","points":None}
             else:        entries[pid[p]]={"kind":"points","points":v}
+        # The house rule: whoever is last (highest total) starts the next game.
+        # Ties break by seat order, matching the app.
+        at_table = [p for p in P if g['raw'][p] is not None]
+        seats = seat(g)
+        def tot(p):
+            v = g['before'][p]
+            return v if v is not None else opening.get(pid[p], 0)
+        starter = max(seats, key=lambda q: (tot({v:k for k,v in pid.items()}[q]),
+                                            -seats.index(q)))
         games.append({"id":"h%03d"%g['no'],"startedAt":epoch(g['ts']),"endedAt":None,
-                      "starter":None,"imported":True,"entries":entries})
+                      "starter":starter,"imported":True,"entries":entries})
     out["sessions"].append({"id":"hs%02d"%(i+1),"startedAt":s['start'],
         "endedAt":s['last'] or s['start'],"seating":s['seat'],"games":games,"live":False,
         "imported":True})

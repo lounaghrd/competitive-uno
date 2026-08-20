@@ -317,12 +317,13 @@ function compute(){
 }
 function copy(o){ var r={}; for(var k in o) r[k]=o[k]; return r; }
 
-/* Who starts: the lowest total right now. Ties resolve by seat order. */
+/* Who starts: whoever is last right now, i.e. carrying the highest total.
+   Ties resolve by seat order. */
 function suggestStarter(seating, totals){
-  var order = (seating && seating.length === 7) ? seating : IDS;
-  var bestId = null;
-  order.forEach(function(id){ if(bestId === null || totals[id] < totals[bestId]) bestId = id; });
-  return bestId;
+  var order = (seating && seating.length >= 2) ? seating : IDS;
+  var worstId = null;
+  order.forEach(function(id){ if(worstId === null || totals[id] > totals[worstId]) worstId = id; });
+  return worstId;
 }
 
 /* ============================ helpers ============================ */
@@ -563,7 +564,7 @@ function viewGameEntry(c, sess){
     + '<div class="hdrnote"><span>🏆 WINNER · ✂️ WON ON A CUT</span><span id="gtimer">'+(isNew?"":fmtTime(g.startedAt))+'</span></div>'
     + rows + '</div>'
     + '<div class="note">Seat order, clockwise. Blank counts as 0. '
-    + (g.starter ? '<b>'+esc(P[g.starter].name)+'</b> started (lowest score) — <a href="#" data-act="cycle-starter" style="color:var(--accent)">someone else?</a>' : '') + '</div>'
+    + (g.starter ? '<b>'+esc(P[g.starter].name)+'</b> started (last on the leaderboard) — <a href="#" data-act="cycle-starter" style="color:var(--accent)">someone else?</a>' : '') + '</div>'
     + '<button class="btn primary big" style="margin-top:14px" data-act="save-game" '+(wid?"":"disabled")+'>'
     + (wid ? "Save game" : "Tap 🏆 on the winner") + '</button>'
     + '<div class="row2" style="margin-top:10px">'

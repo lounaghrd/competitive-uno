@@ -63,9 +63,11 @@ const st = await page.evaluate(()=>{
   window.state = { version:1, sessions:[] };
   const seat=['tom','louna','andy','justin','julia','nathan','nicolas'];
   return [ window.suggestStarter(seat, {andy:5,justin:2,julia:9,nathan:4,tom:7,louna:1,nicolas:3}),
-           window.suggestStarter(seat, {andy:0,justin:0,julia:0,nathan:0,tom:0,louna:0,nicolas:0}) ];
+           window.suggestStarter(seat, {andy:0,justin:0,julia:0,nathan:0,tom:0,louna:0,nicolas:0}),
+           window.suggestStarter(['tom','louna','andy'], {andy:5,justin:99,julia:99,nathan:99,tom:7,louna:1,nicolas:99}) ];
 });
-if (st[0]==='louna' && st[1]==='tom') console.log('ok    starter = lowest total, ties by seat order');
+if (st[0]==='julia' && st[1]==='tom' && st[2]==='tom')
+  console.log('ok    starter = highest total (last place), ties by seat order, only players at the table');
 else { fail++; console.log('FAIL  starter picking:', st); }
 
 if (errs.length) { fail++; console.log('FAIL  page errors:', errs); }

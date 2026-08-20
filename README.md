@@ -27,6 +27,7 @@ delete it, and every total is recalculated from scratch.
 ## House rules the app enforces
 
 - Lowest total wins.
+- Whoever is last (highest total) starts the next game.
 - Winner: **−10**, or **−20** if the last card was a cut.
 - Everyone else: the value of the cards left in their hand.
 - Land **exactly** on a multiple of 200 → **−200**.
@@ -51,9 +52,10 @@ is opened, so the leaderboard starts where the holiday actually is.
   game 67 — so the app handles a table of any size.
 - **Joining totals** are preserved: Tom started on 416, Nicolas on 1335.
 - The one bonus that ever fired is preserved: **Tom landing exactly on 1200**.
-- **Who started each game was never written down**, so it is left blank for
-  those games rather than guessed. Games entered in the app from now on record
-  it properly.
+- **Who started each game was never written down**, so it is filled in from the
+  house rule: whoever was last (highest total) going into that game, ties broken
+  by seat order. Reconstructed from the sheet's own running totals and checked
+  game by game. Justin started 39 of the 101; Nicolas never did.
 - Games 1–23 have no timestamps in the sheet; those sessions show
   "date not recorded".
 

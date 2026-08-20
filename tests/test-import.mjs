@@ -56,7 +56,32 @@ const dl = await Promise.all([ page.waitForEvent('download'), page.click('[data-
 const csv = fs.readFileSync(await dl[0].path(),'utf8').trim().split('\n');
 check(csv.length === 1 + 23*5 + 43*6 + 35*7, `CSV row per player per game (${csv.length-1})`);
 check(csv[0].includes('players_at_table'), 'CSV records how many were at the table');
-check(csv.slice(1).every(r=>r.split(',')[9]===''), 'starter left blank for imported games (it was never recorded)');
+check(csv.slice(1).every(r=>r.split(',')[9]!==''), 'starter filled in for every imported row');
+// the starter of each game must be whoever was last going into it
+const starterCheck = await page.evaluate(()=>{
+  const c = window.compute(); let bad = 0, run = {};
+  Object.keys(window.state.opening||{}).forEach(k=>run[k]=window.state.opening[k]);
+  c.flat.forEach(f=>{
+    const seats = f.sess.seating;
+    const at = seats.filter(id => f.game.entries[id]);
+    let want = null;
+    at.forEach(id => { const t = run[id]||0; if(want===null || t > (run[want]||0)) want = id; });
+    if(f.game.starter !== want) bad++;
+    at.forEach(id => {
+      const e = f.game.entries[id];
+      const base = e.kind==='win' ? -10 : e.kind==='cut' ? -20 : (e.points||0);
+      const mid = (run[id]||0) + base; let b = 0;
+      if(mid>0 && mid%200===0) b -= 200;
+      run[id] = mid + b;
+    });
+  });
+  return bad;
+});
+check(starterCheck === 0, `every imported starter is the player who was last at that moment (${starterCheck} wrong)`);
+const counts = await page.evaluate(()=>{
+  const n={}; window.compute().flat.forEach(f=>{ n[f.game.starter]=(n[f.game.starter]||0)+1; }); return n; });
+check(counts.justin===39 && counts.julia===29 && counts.nathan===23,
+  'starter tally matches the spreadsheet reconstruction: '+JSON.stringify(counts));
 
 // re-importing must not duplicate
 await page.click('[data-act="reimport"]');
