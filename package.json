@@ -1,0 +1,11 @@
+{
+  "name": "competitive-uno",
+  "private": true,
+  "description": "Score tracker for our road trip Uno league.",
+  "scripts": {
+    "serve": "node tests/serve.mjs",
+    "test": "node tests/test-logic.mjs && node tests/test-ui.mjs",
+    "icons": "node tests/icons.mjs"
+  },
+  "devDependencies": { "playwright": "^1.62.1" }
+}
