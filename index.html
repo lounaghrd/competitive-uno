@@ -59,6 +59,10 @@ button{background:none;border:none;cursor:pointer}
   display:flex;align-items:center;gap:7px;
 }
 .pill.live{border-color:#1f5c33;background:#12291a;color:#7fdca0}
+.syncdot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--text-muted)}
+.syncdot.live{background:var(--good);box-shadow:0 0 0 2px rgba(12,163,12,.2)}
+.syncdot.connecting{background:#eda100}
+.syncdot.offline{background:var(--critical)}
 .dotlive{width:7px;height:7px;border-radius:50%;background:var(--good);animation:pulse 1.8s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
 
@@ -202,6 +206,9 @@ table.tbl th,table.tbl td{padding:7px 9px;text-align:right;border-bottom:1px sol
 table.tbl th{color:var(--text-muted);font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em}
 table.tbl th:first-child,table.tbl td:first-child{text-align:left}
 .scroller{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.urlin{width:100%;margin-top:12px;padding:13px;border-radius:11px;border:1px solid var(--border);
+  background:var(--surface-2);font-size:14px}
+.urlin:focus{outline:none;border-color:var(--accent)}
 </style>
 </head>
 <body>
@@ -248,26 +255,267 @@ var APP_VERSION = "2026-08-20d";
 var state = load();
 var ui = { tab:"board", editing:null, draftSeat:null, hidden:{}, scrub:null };
 
-function blank(){ return { version:1, sessions:[], opening:{}, seeded:false }; }
+function blank(){ return { version:2, sessions:[], opening:{}, seeded:false, tombs:{} }; }
+
+/* ---------------------------------------------------------------------------
+   Storage is a flat set of records — one per session, one per game — even
+   though the screens work with a nested structure. That is what makes several
+   phones safe: two people entering different games touch different records, so
+   neither can overwrite the other. Merging is a union by id, and the only time
+   anything is discarded is when the SAME record was edited in two places, where
+   the later edit wins.
+   --------------------------------------------------------------------------- */
+function toRecords(st){
+  var r = { sessions:{}, games:{}, opening: st.opening || {} };
+  st.sessions.forEach(function(sess, si){
+    r.sessions[sess.id] = {
+      id:sess.id, ord: sess.ord != null ? sess.ord : si + 1,
+      startedAt:sess.startedAt || null, endedAt:sess.endedAt || null,
+      seating:sess.seating || null, imported:!!sess.imported,
+      updatedAt:sess.updatedAt || 0
+    };
+    sess.games.forEach(function(g, gi){
+      r.games[g.id] = {
+        id:g.id, sessionId:sess.id, ord: g.ord != null ? g.ord : gi + 1,
+        startedAt:g.startedAt || null, endedAt:g.endedAt || null,
+        starter:g.starter || null, entries:g.entries,
+        imported:!!g.imported, updatedAt:g.updatedAt || 0
+      };
+    });
+  });
+  Object.keys(st.tombs || {}).forEach(function(id){
+    var t = st.tombs[id];
+    (t.kind === "session" ? r.sessions : r.games)[id] = { id:id, deleted:true, updatedAt:t.at };
+  });
+  return r;
+}
+function fromRecords(r, prev){
+  var live = {};
+  (prev && prev.sessions || []).forEach(function(s){ if(s.live) live[s.id] = s.live; });
+  var tombs = {};
+  var byOrd = function(a,b){ return (a.ord - b.ord) || (a.id < b.id ? -1 : 1); };
+  var vals = function(o, kind){
+    return Object.keys(o || {}).map(function(k){
+      var v = o[k]; v.id = v.id || k;
+      if(v.deleted) tombs[v.id] = { kind:kind, at:v.updatedAt || 0 };
+      return v;
+    }).filter(function(v){ return !v.deleted; });
+  };
+  var sessions = vals(r.sessions, "session").sort(byOrd);
+  var index = {};
+  sessions.forEach(function(sess){
+    sess.games = [];
+    if(live[sess.id]) sess.live = live[sess.id];
+    index[sess.id] = sess;
+  });
+  vals(r.games, "game").sort(byOrd).forEach(function(g){
+    if(index[g.sessionId]) index[g.sessionId].games.push(g);
+  });
+  return { version:2, opening:r.opening || {}, sessions:sessions, seeded:true, tombs:tombs };
+}
+
 function load(){
   try {
     var raw = localStorage.getItem(STORE);
     if(!raw) return blank();
     var s = JSON.parse(raw);
-    if(!s || !Array.isArray(s.sessions)) return blank();
-    if(!s.opening) s.opening = {};
+    if(!s) return blank();
+    if(s.records) return fromRecords(s.records, null);
+    if(!Array.isArray(s.sessions)) return blank();
+    if(!s.opening) s.opening = {};        /* a v1 save from before sync existed */
+    if(!s.tombs) s.tombs = {};
     return s;
   } catch(e){ return blank(); }
 }
+
+/* Records whose contents changed since the last save get a fresh timestamp;
+   that timestamp is what settles a genuine two-phone conflict. */
+var lastSaved = null;
+function stampChanges(recs){
+  var now = Date.now(), changed = { sessions:{}, games:{} };
+  ["sessions","games"].forEach(function(kind){
+    Object.keys(recs[kind]).forEach(function(id){
+      var rec = recs[kind][id], was = lastSaved && lastSaved[kind][id];
+      var a = JSON.stringify(withoutStamp(rec)), b = was ? JSON.stringify(withoutStamp(was)) : null;
+      if(a !== b){ rec.updatedAt = now; changed[kind][id] = rec; }
+      else rec.updatedAt = was.updatedAt;
+    });
+  });
+  if(!lastSaved || JSON.stringify(recs.opening) !== JSON.stringify(lastSaved.opening)) changed.opening = recs.opening;
+  return changed;
+}
+function withoutStamp(rec){ var c = {}; for(var k in rec) if(k !== "updatedAt") c[k] = rec[k]; return c; }
+
 function save(){
-  try { localStorage.setItem(STORE, JSON.stringify(state)); }
+  var recs = toRecords(state);
+  var changed = stampChanges(recs);
+  applyStamps(recs);
+  try { localStorage.setItem(STORE, JSON.stringify({ version:2, records:recs })); }
   catch(e){ toast("Couldn't save — phone storage is full"); }
+  lastSaved = JSON.parse(JSON.stringify(recs));
+  Sync.push(changed);
+}
+/* copy the fresh timestamps back onto the objects the screens are holding */
+function applyStamps(recs){
+  state.sessions.forEach(function(sess){
+    var sr = recs.sessions[sess.id]; if(sr) sess.updatedAt = sr.updatedAt;
+    sess.games.forEach(function(g){ var gr = recs.games[g.id]; if(gr) g.updatedAt = gr.updatedAt; });
+  });
+}
+
+/* Merge records arriving from another phone. Union by id; on the same record,
+   the later edit wins. */
+function mergeRemote(remote){
+  if(!remote) return false;
+  var mine = toRecords(state), touched = false;
+  ["sessions","games"].forEach(function(kind){
+    Object.keys(remote[kind] || {}).forEach(function(id){
+      var theirs = remote[kind][id], ours = mine[kind][id];
+      theirs.id = theirs.id || id;
+      if(!ours || (theirs.updatedAt || 0) > (ours.updatedAt || 0)){
+        mine[kind][id] = theirs; touched = true;
+      }
+    });
+  });
+  if(remote.opening && !Object.keys(mine.opening || {}).length && Object.keys(remote.opening).length){
+    mine.opening = remote.opening; touched = true;
+  }
+  if(!touched) return false;
+  state = fromRecords(mine, state);
+  lastSaved = JSON.parse(JSON.stringify(toRecords(state)));
+  try { localStorage.setItem(STORE, JSON.stringify({ version:2, records:lastSaved })); } catch(e){}
+  return true;
 }
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
 function curSession(){
   var s = state.sessions[state.sessions.length-1];
   return (s && !s.endedAt) ? s : null;
 }
+
+/* ============================ live sync ============================ */
+/* Every phone talks to one shared league. Writes go up as individual records,
+   so two people scoring at the same time cannot clobber each other. Reads come
+   down over a live stream, with a slow poll as a safety net for flaky signal.
+   With no connection the app carries on exactly as before and everything
+   queued goes up when the signal returns. */
+var SYNC_KEY = "uno-sync-url";
+var Sync = {
+  url: null,
+  state: "off",            /* off | connecting | live | offline */
+  pending: null,
+  es: null,
+  timer: null,
+
+  configured: function(){ return !!Sync.url; },
+
+  init: function(){
+    /* ?league=… lets one shared link set every phone up in a single tap */
+    var m = location.search.match(/[?&]league=([^&]*)/);
+    if(m && m[1]){
+      try {
+        localStorage.setItem(SYNC_KEY, decodeURIComponent(m[1]).replace(/\/+$/, ""));
+        history.replaceState(null, "", location.pathname);
+      } catch(e){}
+    }
+    Sync.url = (localStorage.getItem(SYNC_KEY) || (window.UNO_SYNC_URL || "")).replace(/\/+$/, "") || null;
+    try { Sync.pending = JSON.parse(localStorage.getItem("uno-sync-pending") || "null"); } catch(e){}
+    if(Sync.url) Sync.connect();
+  },
+
+  setUrl: function(url){
+    url = (url || "").trim().replace(/\/+$/, "");
+    if(url) localStorage.setItem(SYNC_KEY, url); else localStorage.removeItem(SYNC_KEY);
+    Sync.stop();
+    Sync.url = url || null;
+    if(Sync.url){ Sync.push(toRecords(state)); Sync.connect(); }
+    else { Sync.state = "off"; render(); }
+  },
+
+  stop: function(){
+    if(Sync.es){ Sync.es.close(); Sync.es = null; }
+    if(Sync.timer){ clearInterval(Sync.timer); Sync.timer = null; }
+  },
+
+  connect: function(){
+    if(!Sync.url) return;
+    Sync.setState("connecting");
+    Sync.pull();
+    try {
+      Sync.es = new EventSource(Sync.url + ".json");
+      Sync.es.onopen = function(){ Sync.setState("live"); Sync.flush(); };
+      Sync.es.onmessage = function(){ Sync.pull(); };
+      Sync.es.addEventListener("put", function(){ Sync.pull(); });
+      Sync.es.addEventListener("patch", function(){ Sync.pull(); });
+      Sync.es.onerror = function(){ Sync.setState("offline"); };
+    } catch(e){ Sync.setState("offline"); }
+    Sync.timer = setInterval(function(){ Sync.pull(); Sync.flush(); }, 45000);
+  },
+
+  setState: function(st){
+    if(Sync.state === st) return;
+    Sync.state = st;
+    var el = document.getElementById("syncpill");
+    if(el) el.className = "syncdot " + st;
+  },
+
+  pull: function(){
+    if(!Sync.url) return Promise.resolve();
+    return fetch(Sync.url + ".json", { cache:"no-store" })
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(data){
+        Sync.setState("live");
+        if(data && mergeRemote(data) && !ui.editing) render();
+      })
+      .catch(function(){ Sync.setState("offline"); });
+  },
+
+  /* Queue first, send second: nothing is lost if the send fails. */
+  push: function(changed){
+    if(!Sync.url || !changed) return;
+    var any = Object.keys(changed.sessions || {}).length
+            + Object.keys(changed.games || {}).length
+            + (changed.opening ? 1 : 0);
+    if(!any) return;
+    Sync.pending = Sync.pending || { sessions:{}, games:{} };
+    Object.keys(changed.sessions || {}).forEach(function(k){ Sync.pending.sessions[k] = changed.sessions[k]; });
+    Object.keys(changed.games || {}).forEach(function(k){ Sync.pending.games[k] = changed.games[k]; });
+    if(changed.opening) Sync.pending.opening = changed.opening;
+    Sync.savePending();
+    Sync.flush();
+  },
+
+  savePending: function(){
+    try {
+      if(Sync.pending) localStorage.setItem("uno-sync-pending", JSON.stringify(Sync.pending));
+      else localStorage.removeItem("uno-sync-pending");
+    } catch(e){}
+  },
+
+  flush: function(){
+    if(!Sync.url || !Sync.pending || Sync.sending) return;
+    var batch = Sync.pending;
+    Sync.sending = true;
+    var jobs = [];
+    if(Object.keys(batch.sessions || {}).length) jobs.push(Sync.patch("/sessions", batch.sessions));
+    if(Object.keys(batch.games || {}).length)    jobs.push(Sync.patch("/games", batch.games));
+    if(batch.opening)                            jobs.push(Sync.patch("/opening", batch.opening));
+    Promise.all(jobs).then(function(){
+      Sync.sending = false;
+      if(Sync.pending === batch){ Sync.pending = null; Sync.savePending(); }
+      Sync.setState("live");
+    }).catch(function(){
+      Sync.sending = false;
+      Sync.setState("offline");
+    });
+  },
+
+  patch: function(path, body){
+    return fetch(Sync.url + path + ".json", {
+      method:"PATCH", headers:{ "Content-Type":"application/json" }, body:JSON.stringify(body)
+    }).then(function(r){ if(!r.ok) throw new Error(r.status); });
+  }
+};
+window.addEventListener("online", function(){ if(Sync.url){ Sync.pull(); Sync.flush(); } });
 
 /* ============================ scoring ============================ */
 /* Replays every game from the start, so edits and deletions always
@@ -360,14 +608,15 @@ function render(){
   var sess = curSession();
 
   var pill = document.getElementById("statuspill");
+  var syncMark = Sync.configured() ? '<span class="syncdot '+Sync.state+'" id="syncpill"></span>' : '';
   if(sess && sess.live){
-    pill.innerHTML = '<div class="pill live"><span class="dotlive"></span><span class="timer" id="livetimer">0:00</span></div>';
+    pill.innerHTML = '<div class="pill live">'+syncMark+'<span class="dotlive"></span><span class="timer" id="livetimer">0:00</span></div>';
   } else if(ui.editing){
-    pill.innerHTML = '<div class="pill">Editing</div>';
+    pill.innerHTML = '<div class="pill">'+syncMark+'Editing</div>';
   } else if(sess){
-    pill.innerHTML = '<div class="pill">Session · '+sess.games.length+' game'+(sess.games.length===1?"":"s")+'</div>';
+    pill.innerHTML = '<div class="pill">'+syncMark+'Session · '+sess.games.length+' game'+(sess.games.length===1?"":"s")+'</div>';
   } else {
-    pill.innerHTML = '<div class="pill">'+c.flat.length+' games total</div>';
+    pill.innerHTML = '<div class="pill">'+syncMark+c.flat.length+' games total</div>';
   }
 
   var v = document.getElementById("view");
@@ -711,7 +960,29 @@ function viewData(c){
     });
   });
 
-  return '<h2>Take the data with you</h2>'
+  var st = { off:["Not connected","Only this phone has these scores."],
+             connecting:["Connecting…","Reaching the shared league."],
+             live:["Everyone in sync","Scores appear on every phone within seconds."],
+             offline:["No signal","Keep scoring — everything goes up when the signal is back."] }[Sync.state];
+  var queued = Sync.pending
+    ? Object.keys(Sync.pending.games||{}).length + Object.keys(Sync.pending.sessions||{}).length : 0;
+
+  return '<h2>Sharing with everyone</h2>'
+    + '<div class="card" style="padding:15px 14px">'
+    + '<div style="display:flex;align-items:center;gap:9px;font-weight:700;font-size:15px">'
+    + '<span class="syncdot '+Sync.state+'"></span>'+st[0]+'</div>'
+    + '<div class="note" style="margin-top:6px">'+st[1]
+    + (queued ? ' <b>'+queued+' waiting to send.</b>' : '')+'</div>'
+    + '<input class="urlin" id="syncurl" type="url" inputmode="url" autocapitalize="off" autocorrect="off"'
+    + ' placeholder="Paste the league address here" value="'+esc(Sync.url||"")+'">'
+    + (Sync.configured()
+        ? '<button class="btn" style="margin-top:9px" data-act="sync-invite">Copy the invite link</button>'
+          + '<div class="row2" style="margin-top:9px">'
+          + '<button class="btn ghost" data-act="sync-save">Update address</button>'
+          + '<button class="btn ghost danger" data-act="sync-off">Disconnect</button></div>'
+        : '<button class="btn primary" style="margin-top:9px" data-act="sync-save">Connect</button>')
+    + '</div>'
+    + '<h2>Take the data with you</h2>'
     + '<div class="row2">'
     + '<button class="btn" data-act="export-csv">Spreadsheet (CSV)</button>'
     + '<button class="btn" data-act="export-json">Full backup</button>'
@@ -796,6 +1067,10 @@ function loadHistory(){
   if(!window.UNO_HISTORY) return false;
   var h = JSON.parse(JSON.stringify(window.UNO_HISTORY));
   state.opening = h.opening || {};
+  h.sessions.forEach(function(sess, si){
+    sess.ord = si + 1;
+    sess.games.forEach(function(g, gi){ g.ord = (si + 1) * 1000 + gi; });
+  });
   state.sessions = h.sessions.concat(state.sessions.filter(function(s){ return !s.imported; }));
   state.seeded = true;
   save();
@@ -817,7 +1092,7 @@ document.addEventListener("click", function(ev){
   var sess = curSession();
 
   if(act === "new-session"){
-    state.sessions.push({ id:uid(), startedAt:Date.now(), endedAt:null, seating:null, games:[], live:false });
+    state.sessions.push({ id:uid(), ord:Date.now(), startedAt:Date.now(), endedAt:null, seating:null, games:[], live:false });
     ui.draftSeat = lastSeating(null) ? lastSeating(null).slice() : [];
     save(); render(); return;
   }
@@ -846,7 +1121,7 @@ document.addEventListener("click", function(ev){
   if(act === "start-game" || act === "open-live"){
     var c = compute();
     if(act === "start-game"){
-      sess.live = { id:uid(), startedAt:Date.now(), endedAt:null,
+      sess.live = { id:uid(), ord:Date.now(), startedAt:Date.now(), endedAt:null,
         starter:suggestStarter(sess.seating, c.totals), entries:{} };
       save();
     }
@@ -890,12 +1165,30 @@ document.addEventListener("click", function(ev){
   }
   if(act === "delete-game"){
     if(!confirm("Delete this game? Everyone's totals are recalculated.")) return;
-    sess.games.splice(ui.editing.index, 1);
+    var gone = sess.games.splice(ui.editing.index, 1)[0];
+    state.tombs[gone.id] = { kind:"game", at:Date.now() };
     ui.editing = null; save(); render(); toast("Game deleted"); return;
   }
 
   if(act === "toggle-series"){
     var p = el.dataset.p; ui.hidden[p] = !ui.hidden[p]; render(); return;
+  }
+  if(act === "sync-save"){
+    var v = document.getElementById("syncurl").value;
+    Sync.setUrl(v); render();
+    toast(v.trim() ? "Connecting to the shared league…" : "Sharing turned off");
+    return;
+  }
+  if(act === "sync-invite"){
+    var link = location.origin + location.pathname + "?league=" + encodeURIComponent(Sync.url);
+    var done = function(){ toast("Invite link copied — send it to everyone"); };
+    if(navigator.clipboard) navigator.clipboard.writeText(link).then(done, function(){ prompt("Copy this link:", link); });
+    else prompt("Copy this link:", link);
+    return;
+  }
+  if(act === "sync-off"){
+    if(!confirm("Stop sharing with the others? This phone keeps everything it already has.")) return;
+    Sync.setUrl(""); render(); return;
   }
   if(act === "export-csv"){ download("uno-roadtrip.csv", toCSV(compute()), "text/csv"); toast("CSV saved"); return; }
   if(act === "export-json"){ download("uno-backup.json", JSON.stringify(state, null, 2), "application/json"); toast("Backup saved"); return; }
@@ -997,6 +1290,7 @@ function startScrub(ev){
 window.addEventListener("resize", function(){ if(ui.tab === "chart") render(); });
 
 seedOnFirstRun();
+Sync.init();
 
 /* recover a session that was mid-game when the phone was closed */
 (function(){

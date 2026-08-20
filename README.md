@@ -73,11 +73,33 @@ the bottom of the **Data** tab.
 When publishing a change, bump `CACHE` in `sw.js` and `APP_VERSION` in
 `index.html`; `tests/test-update.mjs` proves an installed copy picks it up.
 
+## Playing on several phones
+
+Everyone can score. Each game is stored as its own record, so two people
+entering different games at the same moment both survive — no one overwrites
+anyone. If a phone loses signal it keeps working and sends everything up when
+the signal returns.
+
+**Setting it up once:**
+
+1. Create a free Realtime Database at <https://console.firebase.google.com>
+   (Create project → skip Analytics → Build → Realtime Database → Create
+   Database → choose Europe → start in test mode).
+2. On the **Rules** tab, set `{"rules": {".read": true, ".write": true}}`, so
+   it doesn't stop working after 30 days.
+3. Copy the database address it shows you and add a league name on the end,
+   e.g. `https://YOUR-PROJECT.europe-west1.firebasedatabase.app/uno-roadtrip`.
+4. Paste that into **Data → Sharing with everyone → Connect**.
+5. Tap **Copy the invite link** and send it to everyone. One tap joins them.
+
+Anyone who knows the exact address can read and write the scores. For a card
+game that's fine; don't reuse the database for anything private.
+
 ## Where the scores live
 
-On the phone that entered them, in that browser. Nothing is uploaded and there
-is no account. Export a backup from the **Data** tab now and then, and don't
-clear your browser data mid-holiday.
+On every phone that has joined, and in the shared database if you set one up.
+Without sharing, the scores are on the one phone that entered them. Export a
+backup from the **Data** tab now and then either way.
 
 ## Running it locally
 
