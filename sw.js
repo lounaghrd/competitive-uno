@@ -1,6 +1,6 @@
 /* Offline cache. Bump CACHE when the app changes. */
-var CACHE = "uno-v1";
-var ASSETS = ["./", "./index.html", "./manifest.webmanifest", "./icon.svg"];
+var CACHE = "uno-v2";
+var ASSETS = ["./", "./index.html", "./history.js", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", function(e){
   self.skipWaiting();

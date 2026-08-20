@@ -224,6 +224,7 @@ table.tbl th:first-child,table.tbl td:first-child{text-align:left}
 
 <div class="toast" id="toast"></div>
 
+<script src="history.js"></script>
 <script>
 "use strict";
 /* ============================ constants ============================ */
@@ -246,13 +247,14 @@ var STORE = "uno-roadtrip-v1";
 var state = load();
 var ui = { tab:"board", editing:null, draftSeat:null, hidden:{}, scrub:null };
 
-function blank(){ return { version:1, sessions:[] }; }
+function blank(){ return { version:1, sessions:[], opening:{}, seeded:false }; }
 function load(){
   try {
     var raw = localStorage.getItem(STORE);
     if(!raw) return blank();
     var s = JSON.parse(raw);
     if(!s || !Array.isArray(s.sessions)) return blank();
+    if(!s.opening) s.opening = {};
     return s;
   } catch(e){ return blank(); }
 }
@@ -272,10 +274,11 @@ function curSession(){
    evaluated once per game (no chain reactions). */
 function compute(){
   var totals = {}, games = {}, wins = {}, cuts = {}, worst = {}, best = {};
-  IDS.forEach(function(id){ totals[id]=0; games[id]=0; wins[id]=0; cuts[id]=0; worst[id]=null; best[id]=null; });
+  var opening = state.opening || {};
+  IDS.forEach(function(id){ totals[id]=opening[id]||0; games[id]=0; wins[id]=0; cuts[id]=0; worst[id]=null; best[id]=null; });
 
   var snaps = [{ label:"Start", at:null, totals:copy(totals) }];
-  var flat = [];
+  var flat = [], joined = {};
 
   state.sessions.forEach(function(sess, si){
     sess.games.forEach(function(g, gi){
@@ -293,6 +296,7 @@ function compute(){
         if(e.kind === "win" || e.kind === "cut"){ wins[id]++; if(e.kind==="cut") cuts[id]++; }
         if(worst[id] === null || base > worst[id]) worst[id] = base;
         if(best[id] === null || base < best[id]) best[id] = base;
+        if(joined[id] === undefined) joined[id] = flat.length;
         if(tags.length) events.push({ id:id, tags:tags, landed:mid, bonus:bonus });
       });
       flat.push({ sess:sess, game:g, si:si, gi:gi, no:flat.length+1, bonuses:events });
@@ -304,11 +308,12 @@ function compute(){
     return {
       id:id, total:totals[id], games:games[id], wins:wins[id], cuts:cuts[id],
       worst:worst[id], best:best[id],
-      avg: games[id] ? totals[id]/games[id] : null
+      opening: opening[id] || 0,
+      avg: games[id] ? (totals[id] - (opening[id]||0))/games[id] : null
     };
   }).sort(function(a,b){ return a.total - b.total || a.id.localeCompare(b.id); });
 
-  return { totals:totals, stats:stats, snaps:snaps, flat:flat };
+  return { totals:totals, stats:stats, snaps:snaps, flat:flat, joined:joined };
 }
 function copy(o){ var r={}; for(var k in o) r[k]=o[k]; return r; }
 
@@ -421,8 +426,8 @@ function viewSession(c, sess){
     var past = state.sessions.slice().reverse().slice(0,6).map(function(s){
       var n = state.sessions.indexOf(s) + 1;
       return '<div class="gm"><div class="idx">'+n+'</div>'
-        + '<div><div class="t">'+fmtDay(s.startedAt)+' · '+fmtTime(s.startedAt)+'</div>'
-        + '<div class="s">'+s.games.length+' games</div></div></div>';
+        + '<div><div class="t">'+(s.startedAt ? fmtDay(s.startedAt)+' · '+fmtTime(s.startedAt) : 'Date not recorded')+'</div>'
+        + '<div class="s">'+s.games.length+' games · '+(s.seating?s.seating.length:'?')+' players</div></div></div>';
     }).join("");
     return '<div class="card"><div class="empty"><div class="big">🎬</div>'
       + '<b style="color:var(--text-secondary);display:block;margin-bottom:6px">No session running</b>'
@@ -432,7 +437,7 @@ function viewSession(c, sess){
       + (past ? '<h2>Past sessions</h2><div class="card">'+past+'</div>' : "");
   }
 
-  if(!sess.seating || sess.seating.length !== 7) return viewSeating(sess);
+  if(!sess.seating || sess.seating.length < 2) return viewSeating(sess);
 
   var starter = suggestStarter(sess.seating, c.totals);
   var games = sess.games.slice().reverse().map(function(g){
@@ -473,8 +478,9 @@ function winnerOf(g){
 }
 
 function circleHTML(seating, starter){
+  var n = seating.length;
   var seats = seating.map(function(id, i){
-    var a = (-90 + i * (360/7)) * Math.PI/180;
+    var a = (-90 + i * (360/n)) * Math.PI/180;
     var x = 50 + 38 * Math.cos(a), y = 50 + 38 * Math.sin(a);
     var p = P[id];
     return '<div class="seat filled'+(id===starter?" starter":"")+'" style="left:'+x+'%;top:'+y+'%">'
@@ -488,16 +494,12 @@ function circleHTML(seating, starter){
 }
 
 function viewSeating(sess){
-  var draft = ui.draftSeat || (sess.seating && sess.seating.length===7 ? sess.seating.slice() : [null,null,null,null,null,null,null]);
+  var draft = ui.draftSeat || (sess.seating ? sess.seating.slice() : []);
   ui.draftSeat = draft;
-  var used = draft.filter(Boolean);
+  var n = Math.max(draft.length, 1);
   var seats = draft.map(function(id, i){
-    var a = (-90 + i * (360/7)) * Math.PI/180;
+    var a = (-90 + i * (360/n)) * Math.PI/180;
     var x = 50 + 38 * Math.cos(a), y = 50 + 38 * Math.sin(a);
-    if(!id){
-      return '<button class="seat" data-act="seat-clear" data-i="'+i+'" style="left:'+x+'%;top:'+y+'%">'
-        + '<div class="av">'+(i+1)+'</div><div class="nm muted">empty</div></button>';
-    }
     var p = P[id];
     return '<button class="seat filled" data-act="seat-clear" data-i="'+i+'" style="left:'+x+'%;top:'+y+'%">'
       + '<div class="av" style="background:'+p.color+';border-color:'+p.color+'">'+initials(p.name)+'</div>'
@@ -505,28 +507,29 @@ function viewSeating(sess){
   }).join("");
 
   var pool = PLAYERS.map(function(p){
-    var on = used.indexOf(p.id) === -1;
+    var on = draft.indexOf(p.id) === -1;
     return '<button class="chip'+(on?"":" off")+'" '+(on?'data-act="seat-add" data-p="'+p.id+'"':"disabled")+'>'
       + dotHTML(p.id) + esc(p.name) + '</button>';
   }).join("");
 
   var prev = lastSeating(sess);
-  return '<h2>Who sits where</h2>'
+  return '<h2>Who\'s playing, and where</h2>'
     + '<div class="card" style="padding:14px 12px 16px">'
-    + '<div class="circle">'+seats+'<div class="hubtxt">Tap a name below to fill the next seat, going clockwise</div></div>'
+    + '<div class="circle">'+seats
+    + '<div class="hubtxt">'+(draft.length ? "Tap a seat to remove" : "Tap the names below in seating order, going clockwise")+'</div></div>'
     + '<div class="pool" style="margin-top:14px">'+pool+'</div>'
     + '</div>'
     + '<div class="row2" style="margin-top:12px">'
     + (prev ? '<button class="btn ghost" data-act="seat-last">Same as last time</button>' : '')
     + '<button class="btn ghost" data-act="seat-shuffle">Shuffle</button>'
     + '</div>'
-    + '<button class="btn primary big" style="margin-top:10px" data-act="seat-save" '+(used.length===7?"":"disabled")+'>'
-    + (used.length===7 ? "Confirm seating" : (7-used.length)+" more to seat") + '</button>';
+    + '<button class="btn primary big" style="margin-top:10px" data-act="seat-save" '+(draft.length>=2?"":"disabled")+'>'
+    + (draft.length>=2 ? "Confirm seating ("+draft.length+" playing)" : "Seat at least 2 players") + '</button>';
 }
 function lastSeating(exclude){
   for(var i=state.sessions.length-1;i>=0;i--){
     var s = state.sessions[i];
-    if(s !== exclude && s.seating && s.seating.length===7) return s.seating;
+    if(s !== exclude && s.seating && s.seating.length >= 2) return s.seating;
   }
   return null;
 }
@@ -621,9 +624,12 @@ function drawChart(c){
   var n = snaps.length - 1;
   var X = function(i){ return pad.l + (n === 0 ? 0 : (i/n) * (W - pad.l - pad.r)); };
   var Y = function(v){ return pad.t + (1 - (v - lo)/(hi - lo)) * (H - pad.t - pad.b); };
-  chartGeom = { X:X, Y:Y, n:n, W:W, pad:pad, snaps:snaps };
+  /* a player's line starts at the game they joined, not at zero */
+  var from = {};
+  IDS.forEach(function(id){ from[id] = c.joined[id] === undefined ? null : c.joined[id]; });
+  chartGeom = { X:X, Y:Y, n:n, W:W, pad:pad, snaps:snaps, from:from };
 
-  var ticks = niceTicks(lo, hi, 4);
+  var ticks = niceTicks(lo, hi, 5);
   var grid = ticks.map(function(t){
     var y = Y(t);
     return '<line x1="'+pad.l+'" x2="'+(W-pad.r)+'" y1="'+y.toFixed(1)+'" y2="'+y.toFixed(1)+'" stroke="#2a2a26" stroke-width="1"/>'
@@ -633,8 +639,10 @@ function drawChart(c){
     ? '<line x1="'+pad.l+'" x2="'+(W-pad.r)+'" y1="'+Y(0).toFixed(1)+'" y2="'+Y(0).toFixed(1)+'" stroke="#4a4a45" stroke-width="1" stroke-dasharray="3 3"/>' : "";
 
   var lines = IDS.map(function(id){
-    var d = snaps.map(function(sn, i){ return (i?"L":"M") + X(i).toFixed(1) + " " + Y(sn.totals[id]).toFixed(1); }).join(" ");
-    return '<path d="'+d+'" fill="none" stroke="'+P[id].color+'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="'+(ui.hidden[id]?0.1:1)+'"/>';
+    if(from[id] === null) return "";
+    var pts = [];
+    for(var i = from[id]; i < snaps.length; i++) pts.push((pts.length?"L":"M") + X(i).toFixed(1) + " " + Y(snaps[i].totals[id]).toFixed(1));
+    return '<path d="'+pts.join(" ")+'" fill="none" stroke="'+P[id].color+'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="'+(ui.hidden[id]?0.1:1)+'"/>';
   }).join("");
 
   var xlab = '<text x="'+pad.l+'" y="'+(H-7)+'" fill="#8a8981" font-size="10">start</text>'
@@ -651,7 +659,7 @@ function niceTicks(lo, hi, count){
   var raw = (hi - lo) / count;
   var mag = Math.pow(10, Math.floor(Math.log(raw)/Math.LN10));
   var norm = raw / mag;
-  var step = (norm > 5 ? 10 : norm > 2 ? 5 : norm > 1 ? 2 : 1) * mag;
+  var step = (norm > 7 ? 10 : norm > 3 ? 5 : norm > 1.5 ? 2 : 1) * mag;
   var out = [], t = Math.ceil(lo/step)*step;
   for(; t <= hi && out.length < 9; t += step) out.push(Math.round(t));
   return out;
@@ -666,12 +674,17 @@ function setScrub(i, c){
   var cross = document.getElementById("cross");
   if(g && cross){
     var x = g.X(i);
-    var marks = IDS.filter(function(id){ return !ui.hidden[id]; }).map(function(id){
+    var marks = IDS.filter(function(id){
+      return !ui.hidden[id] && g.from && g.from[id] !== null && g.from[id] !== undefined && i >= g.from[id];
+    }).map(function(id){
       return '<circle cx="'+x.toFixed(1)+'" cy="'+g.Y(sn.totals[id]).toFixed(1)+'" r="4" fill="'+P[id].color+'" stroke="#1a1a19" stroke-width="2"/>';
     }).join("");
     cross.innerHTML = '<line x1="'+x.toFixed(1)+'" x2="'+x.toFixed(1)+'" y1="'+g.pad.t+'" y2="'+(250-g.pad.b)+'" stroke="#5a5a54" stroke-width="1"/>' + marks;
   }
-  var ranked = IDS.slice().sort(function(a,b){ return sn.totals[a]-sn.totals[b]; });
+  var live = IDS.filter(function(id){
+    return c.joined[id] !== undefined && i >= c.joined[id];
+  });
+  var ranked = (live.length ? live : IDS).slice().sort(function(a,b){ return sn.totals[a]-sn.totals[b]; });
   var el = document.getElementById("scrub");
   if(el){
     el.innerHTML = '<div class="hd">'+sn.label+(sn.at?' · '+fmtTime(sn.at):'')+'</div>'
@@ -702,8 +715,18 @@ function viewData(c){
     + '<button class="btn" data-act="export-json">Full backup</button>'
     + '</div>'
     + '<div class="note">The CSV has one row per player per game — score, seat, who started, who won, bonuses. That\'s everything you need to hunt for patterns later.</div>'
+    + (window.UNO_HISTORY ? '<button class="btn ghost" style="margin-top:10px" data-act="reimport">Re-import the '
+        + window.UNO_HISTORY.sessions.reduce(function(a,x){ return a + x.games.length; }, 0)
+        + ' games from the spreadsheet</button>' : '')
     + '<h2>Bonuses that have fired ('+bonusList.length+')</h2>'
     + '<div class="card">'+(bonusList.length ? bonusList.join("") : '<div class="empty">Nobody has landed exactly on a multiple of 200 or their birth year yet.</div>')+'</div>'
+    + (Object.keys(state.opening || {}).length
+        ? '<h2>Starting totals</h2><div class="card" style="padding:14px"><div class="sec" style="font-size:13.5px;line-height:1.7">'
+          + Object.keys(state.opening).map(function(id){
+              return esc(P[id].name) + ' joined the league on <b>' + state.opening[id] + '</b> points.';
+            }).join('<br>')
+          + '</div></div>'
+        : '')
     + '<h2>House rules</h2>'
     + '<div class="card" style="padding:14px"><div class="sec" style="font-size:13.5px;line-height:1.7">'
     + '• Lowest total wins.<br>'
@@ -722,17 +745,19 @@ function viewData(c){
 /* ============================ CSV ============================ */
 function toCSV(c){
   var head = ["session","session_start","game_no","game_in_session","game_start","game_end","game_seconds",
-    "player","seat","starter","left_neighbour","right_neighbour","result","raw_points","bonus","net_change","total_after"];
+    "player","seat","starter","players_at_table","left_neighbour","right_neighbour",
+    "result","raw_points","bonus","net_change","total_after"];
   var lines = [head.join(",")];
-  var running = {}; IDS.forEach(function(id){ running[id] = 0; });
+  var running = {}; IDS.forEach(function(id){ running[id] = (state.opening && state.opening[id]) || 0; });
 
   c.flat.forEach(function(f){
     var g = f.game, seating = f.sess.seating || IDS;
     IDS.forEach(function(id){
       var e = g.entries[id]; if(!e) return;
+      var n = seating.length;
       var seat = seating.indexOf(id);
-      var left = seat >= 0 ? seating[(seat+6)%7] : "";
-      var right = seat >= 0 ? seating[(seat+1)%7] : "";
+      var left = seat >= 0 ? seating[(seat+n-1)%n] : "";
+      var right = seat >= 0 ? seating[(seat+1)%n] : "";
       var base = e.kind === "win" ? -10 : e.kind === "cut" ? -20 : (e.points||0);
       var mid = running[id] + base, bonus = 0;
       if(mid > 0 && mid % 200 === 0) bonus += -200;
@@ -741,7 +766,9 @@ function toCSV(c){
       lines.push([
         f.si+1, iso(f.sess.startedAt), f.no, f.gi+1, iso(g.startedAt), iso(g.endedAt),
         (g.startedAt && g.endedAt) ? Math.round((g.endedAt-g.startedAt)/1000) : "",
-        P[id].name, seat >= 0 ? seat+1 : "", g.starter === id ? "yes" : "no",
+        P[id].name, seat >= 0 ? seat+1 : "",
+        g.starter ? (g.starter === id ? "yes" : "no") : "",
+        seating.length,
         left ? P[left].name : "", right ? P[right].name : "",
         e.kind, base, bonus, base + bonus, running[id]
       ].join(","));
@@ -759,6 +786,24 @@ function download(name, text, type){
   setTimeout(function(){ URL.revokeObjectURL(url); }, 1500);
 }
 
+/* ============================ imported history ============================ */
+/* The first 101 games came from the spreadsheet we kept by hand. Loading is
+   idempotent: it replaces any previously imported sessions rather than
+   stacking a second copy on top. */
+function loadHistory(){
+  if(!window.UNO_HISTORY) return false;
+  var h = JSON.parse(JSON.stringify(window.UNO_HISTORY));
+  state.opening = h.opening || {};
+  state.sessions = h.sessions.concat(state.sessions.filter(function(s){ return !s.imported; }));
+  state.seeded = true;
+  save();
+  return true;
+}
+function seedOnFirstRun(){
+  if(state.seeded || state.sessions.length) { state.seeded = true; return; }
+  loadHistory();
+}
+
 /* ============================ actions ============================ */
 document.addEventListener("click", function(ev){
   var tab = ev.target.closest("[data-tab]");
@@ -771,23 +816,22 @@ document.addEventListener("click", function(ev){
 
   if(act === "new-session"){
     state.sessions.push({ id:uid(), startedAt:Date.now(), endedAt:null, seating:null, games:[], live:false });
-    ui.draftSeat = lastSeating(null) ? lastSeating(null).slice() : [null,null,null,null,null,null,null];
+    ui.draftSeat = lastSeating(null) ? lastSeating(null).slice() : [];
     save(); render(); return;
   }
   if(act === "seat-add"){
-    var i = ui.draftSeat.indexOf(null);
-    if(i >= 0){ ui.draftSeat[i] = el.dataset.p; render(); }
-    return;
+    if(ui.draftSeat.indexOf(el.dataset.p) === -1) ui.draftSeat.push(el.dataset.p);
+    render(); return;
   }
-  if(act === "seat-clear"){ ui.draftSeat[+el.dataset.i] = null; render(); return; }
+  if(act === "seat-clear"){ ui.draftSeat.splice(+el.dataset.i, 1); render(); return; }
   if(act === "seat-last"){ var ls = lastSeating(sess); if(ls){ ui.draftSeat = ls.slice(); render(); } return; }
   if(act === "seat-shuffle"){
-    var a = IDS.slice();
+    var a = (ui.draftSeat && ui.draftSeat.length >= 2) ? ui.draftSeat.slice() : IDS.slice();
     for(var k=a.length-1;k>0;k--){ var j=Math.floor(Math.random()*(k+1)); var t=a[k]; a[k]=a[j]; a[j]=t; }
     ui.draftSeat = a; render(); return;
   }
   if(act === "seat-save"){
-    if(!sess || ui.draftSeat.filter(Boolean).length !== 7) return;
+    if(!sess || ui.draftSeat.length < 2) return;
     sess.seating = ui.draftSeat.slice();
     ui.draftSeat = null; save(); render(); return;
   }
@@ -831,7 +875,7 @@ document.addEventListener("click", function(ev){
   if(act === "cycle-starter"){
     var g2 = ui.editing.game, seat = ui.editing.seating;
     var at = seat.indexOf(g2.starter);
-    g2.starter = seat[(at+1) % 7];
+    g2.starter = seat[(at+1) % seat.length];
     readInputs(); render(); return;
   }
   if(act === "save-game"){ saveGame(); return; }
@@ -853,6 +897,10 @@ document.addEventListener("click", function(ev){
   }
   if(act === "export-csv"){ download("uno-roadtrip.csv", toCSV(compute()), "text/csv"); toast("CSV saved"); return; }
   if(act === "export-json"){ download("uno-backup.json", JSON.stringify(state, null, 2), "application/json"); toast("Backup saved"); return; }
+  if(act === "reimport"){
+    if(!confirm("Reload the games from the spreadsheet? Anything you've entered in the app is kept.")) return;
+    loadHistory(); render(); toast("Spreadsheet history reloaded"); return;
+  }
   if(act === "wipe"){
     if(!confirm("Erase every session and game? This cannot be undone.")) return;
     if(!confirm("Really sure? Export a backup first if you might want it.")) return;
@@ -876,7 +924,7 @@ function saveGame(){
   var ed = ui.editing, g = ed.game, sess = curSession();
   var wid = winnerOf(g);
   if(!wid){ toast("Tap 🏆 next to whoever went out"); return; }
-  IDS.forEach(function(id){ if(!g.entries[id]) g.entries[id] = { kind:"points", points:0 }; });
+  ed.seating.forEach(function(id){ if(!g.entries[id]) g.entries[id] = { kind:"points", points:0 }; });
 
   var before = compute().totals;
   if(ed.isNew){
@@ -944,6 +992,8 @@ function startScrub(ev){
 }
 
 window.addEventListener("resize", function(){ if(ui.tab === "chart") render(); });
+
+seedOnFirstRun();
 
 /* recover a session that was mid-game when the phone was closed */
 (function(){

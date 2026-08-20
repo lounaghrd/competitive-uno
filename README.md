@@ -40,6 +40,27 @@ delete it, and every total is recalculated from scratch.
 Bonuses fire on an exact landing only — 199 and 201 get nothing — and are
 worked out once per game, so landing on 400 takes you to 200 and stops there.
 
+## The games we played before the app existed
+
+The first **101 games** (12–19 August) were kept in a Google Sheet by hand.
+They are baked into `history.js` and load automatically the first time the app
+is opened, so the leaderboard starts where the holiday actually is.
+
+- **12 sessions**, split by the seating order and by gaps of more than 3 hours.
+- Games were played **5-, 6- and 7-handed** — Tom joined at game 24, Nicolas at
+  game 67 — so the app handles a table of any size.
+- **Joining totals** are preserved: Tom started on 416, Nicolas on 1335.
+- The one bonus that ever fired is preserved: **Tom landing exactly on 1200**.
+- **Who started each game was never written down**, so it is left blank for
+  those games rather than guessed. Games entered in the app from now on record
+  it properly.
+- Games 1–23 have no timestamps in the sheet; those sessions show
+  "date not recorded".
+
+Every final total was checked against the spreadsheet's own numbers and matches
+exactly (`npm test`). `tools/build_history.py` regenerates `history.js` from
+`tools/uno-sheet-export.csv`.
+
 ## Where the scores live
 
 On the phone that entered them, in that browser. Nothing is uploaded and there
@@ -54,5 +75,7 @@ npm run serve     # http://localhost:8099
 npm test          # scoring rules + a full run through the app
 ```
 
-`npm test` plays a real league in a headless phone browser and checks the
-totals against hand-calculated values, including both bonus rules.
+`npm test` runs three suites in a headless phone browser: the scoring rules
+against hand-calculated values, a full run through the app (seating, entry,
+editing, export, reload, offline), and the spreadsheet import checked
+player-by-player against the sheet's own totals.

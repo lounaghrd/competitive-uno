@@ -3,6 +3,12 @@ const SHOT='/home/user/competitive-uno/tests/shots';
 import fs from 'fs'; fs.mkdirSync(SHOT,{recursive:true});
 const b = await chromium.launch({ executablePath:'/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
 const ctx = await b.newContext({ viewport:{width:390,height:844}, deviceScaleFactor:2, hasTouch:true, isMobile:true });
+// this suite exercises a fresh league, so opt out of the imported history
+await ctx.addInitScript(() => {
+  // only on the very first load — later reloads must see the saved league
+  if(!localStorage.getItem('uno-roadtrip-v1'))
+    localStorage.setItem('uno-roadtrip-v1', JSON.stringify({version:1,sessions:[],opening:{},seeded:true}));
+});
 const page = await ctx.newPage();
 const errs=[]; page.on('pageerror',e=>errs.push(String(e)));
 page.on('dialog', d=>d.accept());
@@ -20,11 +26,11 @@ await shot('01-empty');
 await page.click('[data-tab="session"]');
 await page.click('[data-act="new-session"]');
 check(await page.isVisible('.circle'), 'seating circle appears');
-check(await page.isDisabled('[data-act="seat-save"]'), 'cannot confirm an unfinished circle');
+check(await page.isDisabled('[data-act="seat-save"]'), 'cannot confirm an empty circle');
 await shot('02-seating-empty');
 for (const n of ['Tom','Louna','Andy','Justin','Julia','Nathan','Nicolas'])
   await page.click(`[data-act="seat-add"]:has-text("${n}")`);
-check(!(await page.isDisabled('[data-act="seat-save"]')), 'confirm unlocks when all 7 are seated');
+check((await page.textContent('[data-act="seat-save"]')).includes('7 playing'), 'confirm shows how many are at the table');
 await shot('03-seating-full');
 await page.click('[data-act="seat-save"]');
 check((await page.textContent('#view')).includes('Start game 1'), 'lands on the session screen ready to play');
