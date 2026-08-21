@@ -253,12 +253,12 @@ var P = {};
 PLAYERS.forEach(function(p){ p.age = THIS_YEAR - p.born; p.yearBonus = -10 * p.age; P[p.id] = p; });
 var IDS = PLAYERS.map(function(p){ return p.id; });
 var STORE = "uno-roadtrip-v1";
-var APP_VERSION = "2026-08-20j";
+var APP_VERSION = "2026-08-20k";
 
 /* ============================ state ============================ */
 var lastSaved = null;      /* must precede load(), which fills it in */
 var state = load();
-var ui = { tab:"board", editing:null, draftSeat:null, hidden:{}, scrub:null, openSession:null };
+var ui = { tab:"board", editing:null, draftSeat:null, hidden:{}, scrub:null, openSession:null, focusSeat:null };
 
 function blank(){ return { version:2, sessions:[], opening:{}, seeded:false, tombs:{} }; }
 
@@ -655,6 +655,53 @@ function toast(msg, kind){
 }
 function dotHTML(id){ return '<span class="dot" style="background:'+P[id].color+'"></span>'; }
 
+/* ====================== who sits next to whom ====================== */
+/* One count per game played as direct neighbours, wrapping round the table. */
+function pairKey(a,b){ return a < b ? a+"|"+b : b+"|"+a; }
+function neighbourCounts(){
+  var cnt = {};
+  state.sessions.forEach(function(sess){
+    var seat = sess.seating, n = seat && seat.length, g = sess.games.length;
+    if(!n || n < 2 || !g) return;
+    var steps = n === 2 ? 1 : n;      /* two players are neighbours once, not twice */
+    for(var i=0;i<steps;i++){
+      var k = pairKey(seat[i], seat[(i+1)%n]);
+      cnt[k] = (cnt[k] || 0) + g;
+    }
+  });
+  return cnt;
+}
+function pairCount(cnt, a, b){ return cnt[pairKey(a,b)] || 0; }
+function seatingCost(order, cnt){
+  var n = order.length, t = 0, steps = n === 2 ? 1 : n;
+  for(var i=0;i<steps;i++) t += pairCount(cnt, order[i], order[(i+1)%n]);
+  return t;
+}
+function eachPermutation(arr, fn){
+  var n = arr.length, out = [], used = [];
+  (function rec(){
+    if(out.length === n){ fn(out); return; }
+    for(var i=0;i<n;i++) if(!used[i]){ used[i]=true; out.push(arr[i]); rec(); out.pop(); used[i]=false; }
+  })();
+}
+/* Every circular arrangement, scored by how much of it we have played before.
+   Seven players is 720 orders once the first seat is fixed, so brute force. */
+function freshestSeating(players, cnt){
+  if(players.length < 3) return { order:players.slice(), cost:0, avg:0, unseen:0 };
+  var first = players[0], rest = players.slice(1);
+  var best = null, sum = 0, seen = 0;
+  eachPermutation(rest, function(perm){
+    var order = [first].concat(perm), c = seatingCost(order, cnt);
+    sum += c; seen++;
+    if(best === null || c < best.cost) best = { cost:c, order:order.slice() };
+  });
+  var n = best.order.length;
+  best.unseen = 0;
+  for(var i=0;i<n;i++) if(pairCount(cnt, best.order[i], best.order[(i+1)%n]) === 0) best.unseen++;
+  best.avg = sum / seen;
+  return best;
+}
+
 /* ============================ render ============================ */
 function render(){
   document.querySelectorAll(".tabbar button").forEach(function(b){
@@ -890,7 +937,8 @@ function viewSeating(sess){
     + '<div class="hubtxt">'+(draft.length ? "Tap a seat to remove" : "Tap the names below in seating order, going clockwise")+'</div></div>'
     + '<div class="pool" style="margin-top:14px">'+pool+'</div>'
     + '</div>'
-    + '<div class="row2" style="margin-top:12px">'
+    + '<button class="btn" style="margin-top:12px" data-act="seat-fresh">Freshest seating</button>'
+    + '<div class="row2" style="margin-top:10px">'
     + (prev ? '<button class="btn ghost" data-act="seat-last">Same as last time</button>' : '')
     + '<button class="btn ghost" data-act="seat-shuffle">Shuffle</button>'
     + '</div>'
@@ -954,7 +1002,49 @@ function viewChart(c){
     return '<button class="lg'+(ui.hidden[s.id]?" dim":"")+'" data-act="toggle-series" data-p="'+s.id+'">'
       + dotHTML(s.id) + esc(P[s.id].name) + '</button>';
   }).join("");
-  return '<h2>Ahead of / behind the average</h2>'
+  var cnt = neighbourCounts();
+  var seated = IDS.filter(function(id){ return c.joined[id] !== undefined; });
+  var pairs = [];
+  for(var i=0;i<seated.length;i++) for(var j=i+1;j<seated.length;j++)
+    pairs.push({ a:seated[i], b:seated[j], n:pairCount(cnt, seated[i], seated[j]) });
+  pairs.sort(function(x,y){ return y.n - x.n; });
+  var fresh = freshestSeating(seated, cnt);
+  var pairRow = function(p){
+    return '<div class="r">' + dotHTML(p.a) + esc(P[p.a].name)
+      + '<span class="muted" style="margin:0 5px">+</span>' + dotHTML(p.b) + esc(P[p.b].name)
+      + '<b>' + (p.n || 'never') + '</b></div>';
+  };
+  var never = pairs.filter(function(p){ return p.n === 0; });
+  var chips = seated.map(function(id){
+    return '<button class="lg'+(ui.focusSeat && ui.focusSeat !== id ? " dim" : "")+'"'
+      + ' data-act="focus-neighbour" data-p="'+id+'">'+dotHTML(id)+esc(P[id].name)+'</button>';
+  }).join("");
+
+  return '<h2>Who sits next to whom</h2>'
+    + '<div class="card">'
+    + '<div class="chartbox" style="padding:6px 6px 0"><svg id="neighbours"></svg></div>'
+    + '<div class="legend">'+chips+'</div>'
+    + '<div class="scrub">'
+    + '<div class="hd">Most games side by side</div>'
+    + pairs.slice(0,5).map(pairRow).join("")
+    + '<div class="hd" style="margin-top:12px">'+(never.length ? 'Never once neighbours' : 'Least often')+'</div>'
+    + (never.length ? never : pairs.slice(-4)).map(pairRow).join("")
+    + '</div></div>'
+    + '<div class="note">Thicker and brighter means more games spent side by side. Tap a name to follow just their lines.</div>'
+
+    + '<h2>A seating you have not tried</h2>'
+    + '<div class="card" style="padding:14px 12px 16px">'
+    + circleHTML(fresh.order, null)
+    + '<div class="note" style="text-align:center;margin-top:10px">'
+    + (fresh.unseen
+        ? '<b>'+plural(fresh.unseen,"pairing")+' here have never been neighbours.</b><br>'
+        : '')
+    + 'About ' + Math.round((1 - fresh.cost/fresh.avg) * 100) + '% less repetition than seating yourselves at random.'
+    + '</div></div>'
+    + '<div class="note">You can apply this when you set up a session \u2014 the seating screen has a'
+    + ' <b>Freshest seating</b> button that works out the same thing for whoever is playing.</div>'
+
+    + '<h2>Ahead of / behind the average</h2>'
     + '<div class="card"><div class="chartbox"><svg id="chartgap"></svg></div></div>'
     + '<div class="note">Everyone starts level. Below the line is better \u2014 that player is carrying'
     + ' fewer points than the group average at that moment. This is the same league as the chart below,'
@@ -999,12 +1089,74 @@ function averages(c){
 function gapValue(c, means, i, id){ return c.snaps[i].totals[id] - means[i]; }
 
 function drawCharts(c){
+  drawNeighbours(c);
   var means = averages(c);
   drawSeries("chartsvg", c, function(i, id){ return c.snaps[i].totals[id]; }, {});
   drawSeries("chartgap", c, function(i, id){ return gapValue(c, means, i, id); },
              { zeroLabel:"average", symmetric:true });
   setScrub(ui.scrub === null || ui.scrub === undefined ? c.snaps.length - 1
                                                        : Math.min(ui.scrub, c.snaps.length - 1), c);
+}
+
+/* A round table: every player a seat, every line a pair. Magnitude rides on
+   one hue getting brighter against the dark surface, with the stroke width
+   carrying it a second time so it survives being read at arm's length. */
+var WEIGHT_RAMP = ["#1c5cab", "#256abf", "#3987e5", "#5598e7", "#86b6ef"];
+function drawNeighbours(c){
+  var svg = document.getElementById("neighbours");
+  if(!svg) return;
+  var seated = IDS.filter(function(id){ return c.joined[id] !== undefined; });
+  var n = seated.length;
+  if(n < 2){ svg.innerHTML = ""; return; }
+  var W = Math.max(260, svg.parentNode.clientWidth), H = Math.min(W, 380);
+  var cx = W/2, cy = H/2, R = Math.min(W, H) * 0.34, NR = 21;
+  var cnt = neighbourCounts();
+  var pos = {};
+  seated.forEach(function(id, i){
+    var a = (-90 + i * (360/n)) * Math.PI/180;
+    pos[id] = { x: cx + R * Math.cos(a), y: cy + R * Math.sin(a) };
+  });
+
+  var max = 0;
+  seated.forEach(function(a,i){ seated.slice(i+1).forEach(function(b){
+    max = Math.max(max, pairCount(cnt,a,b)); }); });
+
+  var edges = "", labels = "";
+  var top = [];
+  for(var i=0;i<n;i++) for(var j=i+1;j<n;j++) top.push({a:seated[i], b:seated[j], n:pairCount(cnt,seated[i],seated[j])});
+  top.sort(function(x,y){ return y.n - x.n; });
+  var labelled = {};
+  top.slice(0,5).forEach(function(p){ labelled[pairKey(p.a,p.b)] = true; });
+
+  top.forEach(function(p){
+    var A = pos[p.a], B = pos[p.b];
+    var involved = !ui.focusSeat || ui.focusSeat === p.a || ui.focusSeat === p.b;
+    var t = max ? p.n / max : 0;
+    var op = (p.n === 0 ? 0.5 : 0.35 + 0.65 * t) * (involved ? 1 : 0.08);
+    var col = p.n === 0 ? "#4a4a45" : WEIGHT_RAMP[Math.min(4, Math.floor(t * 4.999))];
+    edges += '<line x1="'+A.x.toFixed(1)+'" y1="'+A.y.toFixed(1)+'" x2="'+B.x.toFixed(1)+'" y2="'+B.y.toFixed(1)
+      + '" stroke="'+col+'" stroke-width="'+(p.n === 0 ? 1 : (1.2 + 5 * t)).toFixed(2)
+      + '" stroke-linecap="round" opacity="'+op.toFixed(2)+'"'
+      + (p.n === 0 ? ' stroke-dasharray="4 4"' : '') + '/>';
+    if((labelled[pairKey(p.a,p.b)] || (ui.focusSeat && involved)) && involved && p.n){
+      labels += '<text x="'+((A.x+B.x)/2).toFixed(1)+'" y="'+((A.y+B.y)/2 + 3.5).toFixed(1)
+        + '" fill="#e8e7de" font-size="11" font-weight="700" text-anchor="middle"'
+        + ' stroke="#1a1a19" stroke-width="3.5" paint-order="stroke">'+p.n+'</text>';
+    }
+  });
+
+  var nodes = seated.map(function(id){
+    var q = pos[id], dim = ui.focusSeat && ui.focusSeat !== id;
+    return '<g data-act="focus-neighbour" data-p="'+id+'" style="cursor:pointer" opacity="'+(dim?0.45:1)+'">'
+      + '<circle cx="'+q.x.toFixed(1)+'" cy="'+q.y.toFixed(1)+'" r="'+NR+'" fill="'+P[id].color+'" stroke="#1a1a19" stroke-width="3"/>'
+      + '<text x="'+q.x.toFixed(1)+'" y="'+(q.y+4).toFixed(1)+'" fill="#fff" font-size="11" font-weight="800" text-anchor="middle">'+initials(P[id].name)+'</text>'
+      + '<text x="'+q.x.toFixed(1)+'" y="'+(q.y + NR + 13).toFixed(1)+'" fill="#c3c2b7" font-size="10" text-anchor="middle"'
+      + ' stroke="#1a1a19" stroke-width="3" paint-order="stroke">'+esc(P[id].name)+'</text></g>';
+  }).join("");
+
+  svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+  svg.setAttribute("height", H);
+  svg.innerHTML = edges + labels + nodes;
 }
 
 function drawSeries(id, c, valueAt, opt){
@@ -1359,6 +1511,16 @@ document.addEventListener("click", function(ev){
     ui.editing = null; save(); render(); toast("Game deleted"); return;
   }
 
+  if(act === "focus-neighbour"){
+    var who = el.dataset.p;
+    ui.focusSeat = (ui.focusSeat === who) ? null : who;
+    render(); return;
+  }
+  if(act === "seat-fresh"){
+    var pool = (ui.draftSeat && ui.draftSeat.length >= 3) ? ui.draftSeat.slice() : IDS.slice();
+    ui.draftSeat = freshestSeating(pool, neighbourCounts()).order;
+    render(); toast("Seated to avoid the usual neighbours"); return;
+  }
   if(act === "toggle-series"){
     var p = el.dataset.p; ui.hidden[p] = !ui.hidden[p]; render(); return;
   }

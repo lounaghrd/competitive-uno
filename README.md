@@ -23,8 +23,14 @@ It works with no signal.
    is each player's total minus the group average at that moment, so everyone
    starts level and the lines cross instead of climbing; below the line is
    better. Underneath it, the raw totals over time. Drag across either to read
-   any moment; the other follows.
-6. **Data** — export a spreadsheet of every game to dig for patterns later.
+   any moment; the other follows. Above them, *who sits next to whom*: a round
+   table with a line per pair, thicker and brighter the more games they have
+   spent side by side, and dashed where two people have never been neighbours.
+   Tap a seat to follow one player. Under it, a seating nobody has played yet.
+6. The seating screen has a **Freshest seating** button that searches every
+   circular arrangement of whoever is playing and picks the one repeating the
+   fewest past neighbours.
+7. **Data** — export a spreadsheet of every game to dig for patterns later.
 
 Anything typed wrong can be fixed. Tap a past session to open it: you can
 correct or delete any game inside it, or delete the whole session. Every total
