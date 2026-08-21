@@ -24,6 +24,7 @@ await shot('01-empty');
 
 // --- new session + seating
 await page.click('[data-tab="session"]');
+check(await page.isVisible('[data-act="go-sync"]'), 'a phone that is not sharing says so where you score');
 await page.click('[data-act="new-session"]');
 check(await page.isVisible('.circle'), 'seating circle appears');
 check(await page.isDisabled('[data-act="seat-save"]'), 'cannot confirm an empty circle');

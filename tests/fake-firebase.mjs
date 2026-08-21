@@ -13,7 +13,7 @@ const merge = (segs, body) => {
 };
 const notify = () => { for (const r of clients) r.write(`event: patch\ndata: {"path":"/"}\n\n`); };
 
-export function start(port=8097){
+export function start(port=8097, delayMs=0){
   const srv = http.createServer((req,res)=>{
     res.setHeader('Access-Control-Allow-Origin','*');
     res.setHeader('Access-Control-Allow-Headers','*');
@@ -32,9 +32,14 @@ export function start(port=8097){
     }
     let body=''; req.on('data',c=>body+=c);
     req.on('end',()=>{
-      try { merge(segs, JSON.parse(body||'{}')); } catch(e){}
+      const go = () => { try {
+        const parsed = JSON.parse(body||'{}');
+        if(globalThis.__UNO_LOG) console.log('   PATCH /'+segs.join('/')+' <-', Object.keys(parsed).join(','));
+        merge(segs, parsed);
+      } catch(e){}
       res.writeHead(200,{'Content-Type':'application/json'}); res.end(body||'{}');
-      notify();
+      notify(); };
+      if(delayMs) setTimeout(go, delayMs); else go();
     });
   }).listen(port);
   return { srv, reset(){ store={}; }, dump(){ return store; } };

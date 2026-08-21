@@ -207,6 +207,9 @@ table.tbl th,table.tbl td{padding:7px 9px;text-align:right;border-bottom:1px sol
 table.tbl th{color:var(--text-muted);font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em}
 table.tbl th:first-child,table.tbl td:first-child{text-align:left}
 .scroller{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.banner{display:block;width:100%;text-align:left;padding:11px 13px;border-radius:11px;font-size:13px;
+  background:var(--surface-2);border:1px solid var(--border);color:var(--text-secondary);margin-bottom:12px}
+.banner.warn{background:#2a2312;border-color:#5c4a1f;color:#f0d79a}
 .urlin{width:100%;margin-top:12px;padding:13px;border-radius:11px;border:1px solid var(--border);
   background:var(--surface-2);font-size:14px}
 .urlin:focus{outline:none;border-color:var(--accent)}
@@ -250,9 +253,10 @@ var P = {};
 PLAYERS.forEach(function(p){ p.age = THIS_YEAR - p.born; p.yearBonus = -10 * p.age; P[p.id] = p; });
 var IDS = PLAYERS.map(function(p){ return p.id; });
 var STORE = "uno-roadtrip-v1";
-var APP_VERSION = "2026-08-20h";
+var APP_VERSION = "2026-08-20j";
 
 /* ============================ state ============================ */
+var lastSaved = null;      /* must precede load(), which fills it in */
 var state = load();
 var ui = { tab:"board", editing:null, draftSeat:null, hidden:{}, scrub:null, openSession:null };
 
@@ -315,7 +319,8 @@ function fromRecords(r, prev){
   return { version:2, opening:r.opening || {}, sessions:sessions, seeded:true, tombs:tombs };
 }
 
-function load(){
+function load(){ return adopt(loadStored()); }
+function loadStored(){
   try {
     var raw = localStorage.getItem(STORE);
     if(!raw) return blank();
@@ -328,17 +333,28 @@ function load(){
     return s;
   } catch(e){ return blank(); }
 }
+/* What is on disk is also what was last sent, so a plain reload must not make
+   every record look freshly edited. */
+function adopt(st){
+  lastSaved = JSON.parse(JSON.stringify(toRecords(st)));
+  return st;
+}
 
 /* Records whose contents changed since the last save get a fresh timestamp;
-   that timestamp is what settles a genuine two-phone conflict. */
-var lastSaved = null;
+   that timestamp is what settles a genuine two-phone conflict.
+   (lastSaved is declared above load(), which populates it.) */
 function stampChanges(recs){
   var now = Date.now(), changed = { sessions:{}, games:{} };
   ["sessions","games"].forEach(function(kind){
     Object.keys(recs[kind]).forEach(function(id){
       var rec = recs[kind][id], was = lastSaved && lastSaved[kind][id];
       var a = JSON.stringify(withoutStamp(rec)), b = was ? JSON.stringify(withoutStamp(was)) : null;
-      if(a !== b){ rec.updatedAt = now; changed[kind][id] = rec; }
+      if(a !== b){
+        /* a record that arrived with its own timestamp (the imported history)
+           keeps it; anything genuinely edited here is stamped now */
+        if(was || !rec.updatedAt) rec.updatedAt = now;
+        changed[kind][id] = rec;
+      }
       else rec.updatedAt = was.updatedAt;
     });
   });
@@ -409,6 +425,7 @@ function curSession(){
    down over a live stream, with a slow poll as a safety net for flaky signal.
    With no connection the app carries on exactly as before and everything
    queued goes up when the signal returns. */
+var HISTORY_STAMP = 1;   /* older than any real edit, on every phone */
 var SYNC_KEY = "uno-sync-url";
 var Sync = {
   url: null,
@@ -517,6 +534,8 @@ var Sync = {
   flush: function(){
     if(!Sync.url || !Sync.pending || Sync.sending) return;
     var batch = Sync.pending;
+    Sync.pending = null;            /* anything saved from here on queues afresh */
+    Sync.savePending();
     Sync.sending = true;
     var jobs = [];
     if(Object.keys(batch.sessions || {}).length) jobs.push(Sync.patch("/sessions", batch.sessions));
@@ -524,12 +543,26 @@ var Sync = {
     if(batch.opening)                            jobs.push(Sync.patch("/opening", batch.opening));
     Promise.all(jobs).then(function(){
       Sync.sending = false;
-      if(Sync.pending === batch){ Sync.pending = null; Sync.savePending(); }
       Sync.setState("live");
+      if(Sync.pending) Sync.flush();      /* saved while that one was in the air */
     }).catch(function(){
       Sync.sending = false;
+      Sync.requeue(batch);
       Sync.setState("offline");
     });
+  },
+
+  /* Put a failed batch back, without displacing anything newer. */
+  requeue: function(batch){
+    var q = Sync.pending || { sessions:{}, games:{} };
+    ["sessions","games"].forEach(function(kind){
+      Object.keys(batch[kind] || {}).forEach(function(id){
+        if(!q[kind][id]) q[kind][id] = batch[kind][id];
+      });
+    });
+    if(batch.opening && !q.opening) q.opening = batch.opening;
+    Sync.pending = q;
+    Sync.savePending();
   },
 
   patch: function(path, body){
@@ -631,7 +664,7 @@ function render(){
   var sess = curSession();
 
   var pill = document.getElementById("statuspill");
-  var syncMark = Sync.configured() ? '<span class="syncdot '+Sync.state+'" id="syncpill"></span>' : '';
+  var syncMark = '<span class="syncdot '+(Sync.configured()?Sync.state:"off")+'" id="syncpill"></span>';
   if(sess && sess.live){
     pill.innerHTML = '<div class="pill live">'+syncMark+'<span class="dotlive"></span><span class="timer" id="livetimer">0:00</span></div>';
   } else if(ui.editing){
@@ -694,6 +727,20 @@ function nextTarget(total, born){
 function kpi(v,l){ return '<div class="kpi"><div class="v tnum">'+v+'</div><div class="l">'+l+'</div></div>'; }
 
 /* ---------- session ---------- */
+/* Silently not sharing is the worst way for this to fail, so say it where the
+   scoring happens rather than only on the Data tab. */
+function syncBanner(){
+  if(!Sync.configured())
+    return '<button class="banner warn" data-act="go-sync">Not sharing \u2014 these scores stay on this phone.'
+         + ' <b>Set it up \u203a</b></button>';
+  var q = Sync.pending
+    ? Object.keys(Sync.pending.games||{}).length + Object.keys(Sync.pending.sessions||{}).length : 0;
+  if(Sync.state === "offline")
+    return '<div class="banner">No signal'+(q?' \u00b7 '+plural(q,"change")+' waiting to send':'')
+         + ' \u2014 keep scoring, it will catch up.</div>';
+  return '';
+}
+
 function viewSession(c, sess){
   if(ui.editing) return viewGameEntry(c, editSession() || sess);
   if(ui.openSession){
@@ -710,7 +757,7 @@ function viewSession(c, sess){
         + '<div class="s">'+plural(s.games.length,"game")+' · '+plural(s.seating?s.seating.length:0,"player")+'</div></div>'
         + '<div class="chev">›</div></button>';
     }).join("");
-    return '<div class="card"><div class="empty"><div class="big">🎬</div>'
+    return syncBanner() + '<div class="card"><div class="empty"><div class="big">🎬</div>'
       + '<b style="color:var(--text-secondary);display:block;margin-bottom:6px">No session running</b>'
       + 'Start one when everyone sits down.</div></div>'
       + '<div style="margin-top:12px"></div>'
@@ -723,7 +770,7 @@ function viewSession(c, sess){
   var starter = suggestStarter(sess.seating, c.totals);
   var games = gamesListHTML(sess);
 
-  return '<div class="card" style="padding:14px 12px 18px">'
+  return syncBanner() + '<div class="card" style="padding:14px 12px 18px">'
     + circleHTML(sess.seating, starter)
     + '</div>'
     + '<div style="margin-top:12px"></div>'
@@ -1184,8 +1231,10 @@ function loadHistory(){
   var h = JSON.parse(JSON.stringify(window.UNO_HISTORY));
   state.opening = h.opening || {};
   h.sessions.forEach(function(sess, si){
-    sess.ord = si + 1;
-    sess.games.forEach(function(g, gi){ g.ord = (si + 1) * 1000 + gi; });
+    sess.ord = si + 1; sess.updatedAt = HISTORY_STAMP;
+    sess.games.forEach(function(g, gi){
+      g.ord = (si + 1) * 1000 + gi; g.updatedAt = HISTORY_STAMP;
+    });
   });
   h.sessions.forEach(function(sess){
     delete state.tombs[sess.id];
@@ -1313,6 +1362,7 @@ document.addEventListener("click", function(ev){
   if(act === "toggle-series"){
     var p = el.dataset.p; ui.hidden[p] = !ui.hidden[p]; render(); return;
   }
+  if(act === "go-sync"){ ui.tab = "data"; ui.openSession = null; render(); return; }
   if(act === "sync-save"){
     var raw = document.getElementById("syncurl").value;
     var v = Sync.normalise(raw);
