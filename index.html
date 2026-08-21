@@ -249,7 +249,7 @@ var P = {};
 PLAYERS.forEach(function(p){ p.age = THIS_YEAR - p.born; p.yearBonus = -10 * p.age; P[p.id] = p; });
 var IDS = PLAYERS.map(function(p){ return p.id; });
 var STORE = "uno-roadtrip-v1";
-var APP_VERSION = "2026-08-20e";
+var APP_VERSION = "2026-08-20f";
 
 /* ============================ state ============================ */
 var state = load();
@@ -673,15 +673,16 @@ function viewBoard(c){
 
   var lead = c.stats[0], last = c.stats[c.stats.length-1];
   return '<div class="card">'
-    + '<div class="hdrnote"><span>LOWEST SCORE WINS</span><span>'+c.flat.length+' games played</span></div>'
+    + '<div class="hdrnote"><span>LOWEST SCORE WINS</span><span>POINTS TO NEXT BONUS</span></div>'
     + rows + '</div>'
+    + '<div class="note">The small grey number is the next bonus: how far that player is from'
+    + ' landing <b>exactly</b> on a multiple of 200, or exactly on their birth year.</div>'
     + '<h2>Right now</h2>'
     + '<div class="kpis">'
     + kpi(lead.total, esc(P[lead.id].name)+" leads")
     + kpi(last.total - lead.total, "Spread 1st→7th")
     + kpi(c.flat.length, "Games logged")
-    + '</div>'
-    + '<div class="note">The small number under each score is the next jackpot: how many points away they are from landing <b>exactly</b> on a multiple of 200, or exactly on their birth year.</div>';
+    + '</div>';
 }
 function nextTarget(total, born){
   var t200 = total < 0 ? 200 : (Math.floor(total/200) + 1) * 200;

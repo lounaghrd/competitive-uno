@@ -43,7 +43,7 @@ check(played.nathan===101 && played.tom===78 && played.nicolas===35,
 
 // screens render with the real data
 await page.click('[data-tab="board"]'); await page.screenshot({path:'tests/shots/I-board.png'});
-check((await page.textContent('#view')).includes('101 games played'), 'leaderboard shows the full league');
+check((await page.evaluate(()=>window.compute().flat.length))===101, 'leaderboard shows the full league');
 await page.click('[data-tab="chart"]');
 const paths = await page.$$eval('#chartsvg path[stroke-width="2"]', p=>p.length);
 check(paths===7, 'chart draws all seven players');

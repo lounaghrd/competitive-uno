@@ -62,7 +62,8 @@ await play('andy','cut',{justin:15,julia:44,nathan:0,tom:66,louna:28,nicolas:150
 // --- leaderboard
 await page.click('[data-tab="board"]');
 const board = await page.textContent('#view');
-check(board.includes('4 games played'), 'leaderboard counts the games');
+check(board.includes('POINTS TO NEXT BONUS'), 'the next-bonus column is labelled, not a bare arrow');
+check(board.includes('landing'), 'and explained right under the table');
 const totals = await page.evaluate(()=>window.compute().totals);
 check(totals.justin === 75, `Justin totals 75 - he hit exactly 200 in game 2 and got the bonus (got ${totals.justin})`);
 const fired = await page.evaluate(()=>window.compute().flat.flatMap(f=>f.bonuses));
