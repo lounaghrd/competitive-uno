@@ -250,7 +250,7 @@ var P = {};
 PLAYERS.forEach(function(p){ p.age = THIS_YEAR - p.born; p.yearBonus = -10 * p.age; P[p.id] = p; });
 var IDS = PLAYERS.map(function(p){ return p.id; });
 var STORE = "uno-roadtrip-v1";
-var APP_VERSION = "2026-08-20g";
+var APP_VERSION = "2026-08-20h";
 
 /* ============================ state ============================ */
 var state = load();
@@ -737,6 +737,18 @@ function viewSession(c, sess){
     + (games ? '<h2>This session ('+sess.games.length+')</h2><div class="card">'+games+'</div>' : '<div class="note">Nothing played yet this session.</div>');
 }
 
+/* The average score of a game: the mean of what everyone at the table took,
+   the winner's -10 or -20 included. Bonuses are not part of it - they are not
+   points off a hand. Divided by however many actually played. */
+function baseScore(e){ return e.kind === "win" ? -10 : e.kind === "cut" ? -20 : (e.points || 0); }
+function gameAverage(g){
+  var ids = Object.keys(g.entries || {});
+  if(!ids.length) return null;
+  var sum = ids.reduce(function(a,id){ return a + baseScore(g.entries[id]); }, 0);
+  return sum / ids.length;
+}
+function fmtAvg(v){ return v === null ? "–" : (Math.round(v*10)/10); }
+
 function gamesListHTML(sess){
   return sess.games.slice().reverse().map(function(g){
     var n = sess.games.indexOf(g) + 1;
@@ -749,7 +761,8 @@ function gamesListHTML(sess){
     return '<button class="gm" data-act="edit-game" data-g="'+g.id+'">'
       + '<div class="idx">'+n+'</div>'
       + '<div><div class="t">'+(wid ? esc(P[wid].name)+" won"+(cut?" ✂️":"") : "No winner")+'</div>'
-      + '<div class="s">'+fmtTime(g.startedAt)+(high?' · '+esc(P[high.id].name)+' took '+high.points:'')+'</div></div>'
+      + '<div class="s">'+fmtTime(g.startedAt)+' · avg '+fmtAvg(gameAverage(g))
+      + (high?' · '+esc(P[high.id].name)+' took '+high.points:'')+'</div></div>'
       + '<div class="chev">›</div></button>';
   }).join("");
 }
@@ -766,7 +779,9 @@ function viewPastSession(c, sess){
     + '<div class="card" style="padding:14px 12px 16px">'
     + '<div style="text-align:center;font-weight:700;font-size:16px">'+when+'</div>'
     + '<div style="text-align:center" class="note">'+plural(sess.games.length,"game")
-    + ' · '+plural(sess.seating ? sess.seating.length : 0,"player")+'</div>'
+    + ' · '+plural(sess.seating ? sess.seating.length : 0,"player")
+    + (sess.games.length ? ' · avg ' + fmtAvg(sess.games.reduce(function(a,g){ return a + gameAverage(g); },0)/sess.games.length) : '')
+    + '</div>'
     + (sess.seating ? circleHTML(sess.seating, null) : '')
     + '</div>'
     + (sess.games.length
@@ -1120,7 +1135,7 @@ function viewData(c){
 function toCSV(c){
   var head = ["session","session_start","game_no","game_in_session","game_start","game_end","game_seconds",
     "player","seat","starter","players_at_table","left_neighbour","right_neighbour",
-    "result","raw_points","bonus","net_change","total_after"];
+    "result","raw_points","bonus","net_change","total_after","game_average"];
   var lines = [head.join(",")];
   var running = {}; IDS.forEach(function(id){ running[id] = (state.opening && state.opening[id]) || 0; });
 
@@ -1144,7 +1159,7 @@ function toCSV(c){
         g.starter ? (g.starter === id ? "yes" : "no") : "",
         seating.length,
         left ? P[left].name : "", right ? P[right].name : "",
-        e.kind, base, bonus, base + bonus, running[id]
+        e.kind, base, bonus, base + bonus, running[id], fmtAvg(gameAverage(g))
       ].join(","));
     });
   });
@@ -1360,18 +1375,20 @@ function saveGame(){
   save();
 
   var c = compute();
+  var avg = "average " + fmtAvg(gameAverage(g));
   var msg = null;
   if(ed.isNew){
     var f = c.flat[c.flat.length-1];
     if(f && f.bonuses.length){
       msg = f.bonuses.map(function(b){
         return "🎉 " + P[b.id].name + " landed exactly on " + b.landed + " → " + b.bonus + "!";
-      }).join("  ");
+      }).join("  ") + "  ·  " + avg;
     }
   }
   render();
   if(msg) toast(msg, "bonus");
-  else toast(ed.isNew ? (P[wid].name + " wins game " + c.flat.length) : "Game updated");
+  else toast(ed.isNew ? (P[wid].name + " wins game " + c.flat.length + "  ·  " + avg)
+                      : ("Game updated  ·  " + avg));
   if(pendingUpdate){ pendingUpdate = false; setTimeout(function(){ location.reload(); }, 1200); }
 }
 

@@ -15,7 +15,8 @@ It works with no signal.
    (lowest score). Tap *someone else?* if you need to override it.
 3. When the hand ends: tap 🏆 next to the winner (or ✂️ if they went out on a
    cut), type everyone else's leftover card points, and **Save game**.
-   A blank box counts as 0.
+   A blank box counts as 0. The confirmation announces the game's average
+   score, which is the fun fact read out at the table.
 4. **Leaderboard** — lowest total wins. The small grey number is how far each
    player is from their next jackpot.
 5. **Chart** — two views of the same league. *Ahead of / behind the average*
@@ -28,6 +29,12 @@ It works with no signal.
 Anything typed wrong can be fixed. Tap a past session to open it: you can
 correct or delete any game inside it, or delete the whole session. Every total
 is recalculated from scratch, on every phone.
+
+**The average score of a game** is the mean of what everyone at the table
+took, the winner's −10 or −20 included, divided by however many played. It
+appears on the save confirmation, against every game in a session list, as a
+session average, and as a `game_average` column in the export. Bonuses are not
+part of it — they are not points off a hand.
 
 ## House rules the app enforces
 
