@@ -105,7 +105,7 @@ await shot('09-chart');
 const boxEl = await page.$('#chartsvg'); const bb = await boxEl.boundingBox();
 await page.mouse.move(bb.x+bb.width*0.45, bb.y+bb.height/2); await page.mouse.down();
 await page.mouse.move(bb.x+bb.width*0.55, bb.y+bb.height/2); await page.mouse.up();
-const crossN = await page.$$eval('#cross > *', e=>e.length);
+const crossN = await page.$$eval('#chartsvg .cross > *', e=>e.length);
 check(crossN >= 8, `dragging draws the crosshair + a dot per player (${crossN} marks)`);
 const scrubbed = await page.evaluate(()=>window.ui ? null : null);
 check((await page.textContent('#scrub')).match(/Game \d+|Start/) !== null, 'the read-out follows the drag');

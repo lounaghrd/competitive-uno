@@ -201,6 +201,7 @@ h2:first-child{margin-top:0}
 .scrub .hd{font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px}
 .scrub .r{display:flex;align-items:center;gap:8px;font-size:13px;padding:3px 0}
 .scrub .r b{margin-left:auto;font-variant-numeric:tabular-nums;font-weight:700}
+.scrub .r .gap{width:52px;text-align:right;color:var(--text-muted);font-size:12px}
 table.tbl{width:100%;border-collapse:collapse;font-size:12.5px}
 table.tbl th,table.tbl td{padding:7px 9px;text-align:right;border-bottom:1px solid var(--border-soft);font-variant-numeric:tabular-nums}
 table.tbl th{color:var(--text-muted);font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em}
@@ -249,7 +250,7 @@ var P = {};
 PLAYERS.forEach(function(p){ p.age = THIS_YEAR - p.born; p.yearBonus = -10 * p.age; P[p.id] = p; });
 var IDS = PLAYERS.map(function(p){ return p.id; });
 var STORE = "uno-roadtrip-v1";
-var APP_VERSION = "2026-08-20f";
+var APP_VERSION = "2026-08-20g";
 
 /* ============================ state ============================ */
 var state = load();
@@ -647,7 +648,7 @@ function render(){
   else if(ui.tab === "chart") v.innerHTML = viewChart(c);
   else v.innerHTML = viewData(c);
 
-  if(ui.tab === "chart") drawChart(c);
+  if(ui.tab === "chart") drawCharts(c);
   tickTimer();
 }
 
@@ -883,7 +884,7 @@ function viewGameEntry(c, sess){
 /* ---------- chart ---------- */
 function viewChart(c){
   if(c.snaps.length < 2){
-    return '<div class="card"><div class="empty"><div class="big">📈</div>'
+    return '<div class="card"><div class="empty"><div class="big">\ud83d\udcc8</div>'
       + '<b style="color:var(--text-secondary);display:block;margin-bottom:6px">Nothing to plot yet</b>'
       + 'The lines appear once you\'ve saved a game or two.</div></div>';
   }
@@ -891,13 +892,19 @@ function viewChart(c){
     return '<button class="lg'+(ui.hidden[s.id]?" dim":"")+'" data-act="toggle-series" data-p="'+s.id+'">'
       + dotHTML(s.id) + esc(P[s.id].name) + '</button>';
   }).join("");
-  return '<h2>Total points over time</h2>'
+  return '<h2>Ahead of / behind the average</h2>'
+    + '<div class="card"><div class="chartbox"><svg id="chartgap"></svg></div></div>'
+    + '<div class="note">Everyone starts level. Below the line is better \u2014 that player is carrying'
+    + ' fewer points than the group average at that moment. This is the same league as the chart below,'
+    + ' with the steady climb taken out.</div>'
+    + '<h2>Total points over time</h2>'
     + '<div class="card">'
     + '<div class="chartbox"><svg id="chartsvg"></svg></div>'
     + '<div class="legend">'+legend+'</div>'
     + '<div class="scrub" id="scrub"></div>'
     + '</div>'
-    + '<div class="note">A line dipping means a bonus landed. Drag across the chart to read any moment. Tap a name to focus one player.</div>'
+    + '<div class="note">A line dipping means a bonus landed. Drag across either chart to read any moment.'
+    + ' Tap a name to focus one player.</div>'
     + '<h2>The same thing as a table</h2>'
     + '<div class="card scroller">' + tableHTML(c) + '</div>';
 }
@@ -911,46 +918,77 @@ function tableHTML(c){
   return '<table class="tbl"><thead>'+head+'</thead><tbody>'+body+'</tbody></table>';
 }
 
-var chartGeom = null;
-function drawChart(c){
-  var svg = document.getElementById("chartsvg");
+var chartGeoms = {};
+
+/* Who is in the league at snapshot i (a player joins at their first game). */
+function liveAt(c, i){
+  return IDS.filter(function(id){ return c.joined[id] !== undefined && i >= c.joined[id]; });
+}
+/* The group average at each snapshot, over everyone who has joined by then.
+   Deliberately independent of which lines are dimmed: hiding a player is a
+   way of looking, not a change to the league. */
+function averages(c){
+  return c.snaps.map(function(sn, i){
+    var live = liveAt(c, i);
+    if(!live.length) return 0;
+    return live.reduce(function(a,id){ return a + sn.totals[id]; }, 0) / live.length;
+  });
+}
+function gapValue(c, means, i, id){ return c.snaps[i].totals[id] - means[i]; }
+
+function drawCharts(c){
+  var means = averages(c);
+  drawSeries("chartsvg", c, function(i, id){ return c.snaps[i].totals[id]; }, {});
+  drawSeries("chartgap", c, function(i, id){ return gapValue(c, means, i, id); },
+             { zeroLabel:"average", symmetric:true });
+  setScrub(ui.scrub === null || ui.scrub === undefined ? c.snaps.length - 1
+                                                       : Math.min(ui.scrub, c.snaps.length - 1), c);
+}
+
+function drawSeries(id, c, valueAt, opt){
+  var svg = document.getElementById(id);
   if(!svg) return;
-  var box = svg.parentNode;
-  var W = Math.max(260, box.clientWidth), H = 250;
+  var W = Math.max(260, svg.parentNode.clientWidth), H = 250;
   var pad = { l:38, r:14, t:14, b:26 };
-  var snaps = c.snaps;
-  var vis = IDS.filter(function(id){ return !ui.hidden[id]; });
-  var series = vis.length ? vis : IDS;
+  var snaps = c.snaps, n = snaps.length - 1;
+
+  var from = {};
+  IDS.forEach(function(p){ from[p] = c.joined[p] === undefined ? null : c.joined[p]; });
+  var vis = IDS.filter(function(p){ return !ui.hidden[p] && from[p] !== null; });
+  var series = vis.length ? vis : IDS.filter(function(p){ return from[p] !== null; });
 
   var lo = Infinity, hi = -Infinity;
-  snaps.forEach(function(sn){ series.forEach(function(id){
-    lo = Math.min(lo, sn.totals[id]); hi = Math.max(hi, sn.totals[id]);
-  }); });
+  series.forEach(function(p){
+    for(var i = from[p]; i <= n; i++){ var v = valueAt(i, p); if(v < lo) lo = v; if(v > hi) hi = v; }
+  });
+  if(!isFinite(lo)){ lo = 0; hi = 1; }
+  if(opt.symmetric){ var m = Math.max(Math.abs(lo), Math.abs(hi)) || 10; lo = -m; hi = m; }
   if(lo === hi){ lo -= 10; hi += 10; }
   var span = hi - lo; lo -= span*0.08; hi += span*0.08;
 
-  var n = snaps.length - 1;
   var X = function(i){ return pad.l + (n === 0 ? 0 : (i/n) * (W - pad.l - pad.r)); };
   var Y = function(v){ return pad.t + (1 - (v - lo)/(hi - lo)) * (H - pad.t - pad.b); };
-  /* a player's line starts at the game they joined, not at zero */
-  var from = {};
-  IDS.forEach(function(id){ from[id] = c.joined[id] === undefined ? null : c.joined[id]; });
-  chartGeom = { X:X, Y:Y, n:n, W:W, pad:pad, snaps:snaps, from:from };
+  chartGeoms[id] = { X:X, Y:Y, n:n, W:W, H:H, pad:pad, from:from, valueAt:valueAt };
 
-  var ticks = niceTicks(lo, hi, 5);
-  var grid = ticks.map(function(t){
+  var grid = niceTicks(lo, hi, 5).map(function(t){
     var y = Y(t);
     return '<line x1="'+pad.l+'" x2="'+(W-pad.r)+'" y1="'+y.toFixed(1)+'" y2="'+y.toFixed(1)+'" stroke="#2a2a26" stroke-width="1"/>'
       + '<text x="'+(pad.l-7)+'" y="'+(y+3.5).toFixed(1)+'" fill="#8a8981" font-size="10" text-anchor="end">'+t+'</text>';
   }).join("");
-  var zero = (lo < 0 && hi > 0)
-    ? '<line x1="'+pad.l+'" x2="'+(W-pad.r)+'" y1="'+Y(0).toFixed(1)+'" y2="'+Y(0).toFixed(1)+'" stroke="#4a4a45" stroke-width="1" stroke-dasharray="3 3"/>' : "";
 
-  var lines = IDS.map(function(id){
-    if(from[id] === null) return "";
-    var pts = [];
-    for(var i = from[id]; i < snaps.length; i++) pts.push((pts.length?"L":"M") + X(i).toFixed(1) + " " + Y(snaps[i].totals[id]).toFixed(1));
-    return '<path d="'+pts.join(" ")+'" fill="none" stroke="'+P[id].color+'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="'+(ui.hidden[id]?0.1:1)+'"/>';
+  var zero = "";
+  if(lo < 0 && hi > 0){
+    var zy = Y(0).toFixed(1);
+    zero = '<line x1="'+pad.l+'" x2="'+(W-pad.r)+'" y1="'+zy+'" y2="'+zy+'" stroke="#6a6a63" stroke-width="1" stroke-dasharray="3 3"/>'
+      /* on the left: the right-hand edge is where the lines end */
+      + (opt.zeroLabel ? '<text x="'+(pad.l+5)+'" y="'+(Y(0)-5).toFixed(1)+'" fill="#8a8981" font-size="10">'+opt.zeroLabel+'</text>' : "");
+  }
+
+  var lines = IDS.map(function(p){
+    if(from[p] === null) return "";
+    var d = [];
+    for(var i = from[p]; i <= n; i++) d.push((d.length?"L":"M") + X(i).toFixed(1) + " " + Y(valueAt(i,p)).toFixed(1));
+    return '<path d="'+d.join(" ")+'" fill="none" stroke="'+P[p].color+'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="'+(ui.hidden[p]?0.1:1)+'"/>';
   }).join("");
 
   var xlab = '<text x="'+pad.l+'" y="'+(H-7)+'" fill="#8a8981" font-size="10">start</text>'
@@ -958,9 +996,7 @@ function drawChart(c){
 
   svg.setAttribute("viewBox", "0 0 " + W + " " + H);
   svg.setAttribute("height", H);
-  svg.innerHTML = grid + zero + lines + xlab + '<g id="cross"></g>';
-
-  setScrub(ui.scrub === null || ui.scrub === undefined ? n : Math.min(ui.scrub, n), c);
+  svg.innerHTML = grid + zero + lines + xlab + '<g class="cross"></g>';
 }
 
 function niceTicks(lo, hi, count){
@@ -978,29 +1014,37 @@ function setScrub(i, c){
   ui.scrub = i;
   var sn = c.snaps[i];
   if(!sn) return;
-  var g = chartGeom;
-  var cross = document.getElementById("cross");
-  if(g && cross){
+  var means = averages(c);
+
+  Object.keys(chartGeoms).forEach(function(key){
+    var g = chartGeoms[key], svg = document.getElementById(key);
+    if(!g || !svg) return;
+    var cross = svg.querySelector(".cross");
+    if(!cross) return;
     var x = g.X(i);
     var marks = IDS.filter(function(id){
-      return !ui.hidden[id] && g.from && g.from[id] !== null && g.from[id] !== undefined && i >= g.from[id];
+      return !ui.hidden[id] && g.from[id] !== null && i >= g.from[id];
     }).map(function(id){
-      return '<circle cx="'+x.toFixed(1)+'" cy="'+g.Y(sn.totals[id]).toFixed(1)+'" r="4" fill="'+P[id].color+'" stroke="#1a1a19" stroke-width="2"/>';
+      return '<circle cx="'+x.toFixed(1)+'" cy="'+g.Y(g.valueAt(i,id)).toFixed(1)+'" r="4" fill="'+P[id].color+'" stroke="#1a1a19" stroke-width="2"/>';
     }).join("");
-    cross.innerHTML = '<line x1="'+x.toFixed(1)+'" x2="'+x.toFixed(1)+'" y1="'+g.pad.t+'" y2="'+(250-g.pad.b)+'" stroke="#5a5a54" stroke-width="1"/>' + marks;
-  }
-  var live = IDS.filter(function(id){
-    return c.joined[id] !== undefined && i >= c.joined[id];
+    cross.innerHTML = '<line x1="'+x.toFixed(1)+'" x2="'+x.toFixed(1)+'" y1="'+g.pad.t+'" y2="'+(g.H-g.pad.b)+'" stroke="#5a5a54" stroke-width="1"/>' + marks;
   });
+
+  var live = liveAt(c, i);
   var ranked = (live.length ? live : IDS).slice().sort(function(a,b){ return sn.totals[a]-sn.totals[b]; });
   var el = document.getElementById("scrub");
   if(el){
-    el.innerHTML = '<div class="hd">'+sn.label+(sn.at?' · '+fmtTime(sn.at):'')+'</div>'
+    el.innerHTML = '<div class="hd">'+sn.label+(sn.at?' \u00b7 '+fmtTime(sn.at):'')+'</div>'
       + ranked.map(function(id, k){
+          var gap = Math.round(sn.totals[id] - means[i]);
           return '<div class="r"'+(ui.hidden[id]?' style="opacity:.35"':'')+'>'
             + '<span class="muted tnum" style="width:14px">'+(k+1)+'</span>'
-            + dotHTML(id) + esc(P[id].name) + '<b>'+sn.totals[id]+'</b></div>';
-        }).join("");
+            + dotHTML(id) + esc(P[id].name)
+            + '<b>'+sn.totals[id]+'</b>'
+            + '<span class="gap tnum">'+(gap > 0 ? "+" : gap < 0 ? "\u2212" : "")+Math.abs(gap)+'</span>'
+            + '</div>';
+        }).join("")
+      + '<div class="note" style="margin-top:7px">total \u00b7 how far from the average</div>';
   }
 }
 
@@ -1352,13 +1396,15 @@ setInterval(tickTimer, 1000);
 /* chart scrubbing */
 document.addEventListener("pointerdown", startScrub);
 function startScrub(ev){
-  var svg = ev.target.closest("#chartsvg");
-  if(!svg || !chartGeom) return;
+  var svg = ev.target.closest("#chartsvg, #chartgap");
+  var g = svg && chartGeoms[svg.id];
+  if(!g) return;
+  /* dragging either chart moves the crosshair on both */
   var move = function(e){
     var r = svg.getBoundingClientRect();
-    var px = (e.clientX - r.left) * (chartGeom.W / r.width);
-    var t = (px - chartGeom.pad.l) / (chartGeom.W - chartGeom.pad.l - chartGeom.pad.r);
-    var i = Math.round(Math.max(0, Math.min(1, t)) * chartGeom.n);
+    var px = (e.clientX - r.left) * (g.W / r.width);
+    var t = (px - g.pad.l) / (g.W - g.pad.l - g.pad.r);
+    var i = Math.round(Math.max(0, Math.min(1, t)) * g.n);
     setScrub(i);
   };
   move(ev);

@@ -18,7 +18,11 @@ It works with no signal.
    A blank box counts as 0.
 4. **Leaderboard** — lowest total wins. The small grey number is how far each
    player is from their next jackpot.
-5. **Chart** — everyone's total over time. Drag across it to read any moment.
+5. **Chart** — two views of the same league. *Ahead of / behind the average*
+   is each player's total minus the group average at that moment, so everyone
+   starts level and the lines cross instead of climbing; below the line is
+   better. Underneath it, the raw totals over time. Drag across either to read
+   any moment; the other follows.
 6. **Data** — export a spreadsheet of every game to dig for patterns later.
 
 Anything typed wrong can be fixed. Tap a past session to open it: you can
