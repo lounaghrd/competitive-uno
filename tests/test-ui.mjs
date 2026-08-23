@@ -34,7 +34,8 @@ for (const n of ['Tom','Louna','Andy','Justin','Julia','Nathan','Nicolas'])
 check((await page.textContent('[data-act="seat-save"]')).includes('7 playing'), 'confirm shows how many are at the table');
 await shot('03-seating-full');
 await page.click('[data-act="seat-save"]');
-check((await page.textContent('#view')).includes('Start game 1'), 'lands on the session screen ready to play');
+check((await page.textContent('#view')).includes('enter results'),
+  'confirming the seating starts the clock and goes straight to entering results');
 check((await page.textContent('.seat.starter')).includes('Tom'), 'starter shown (all tied at 0 -> first seat)');
 await shot('04-session-ready');
 
@@ -45,7 +46,7 @@ async function play(winner, kind, points){
   for (const [p,v] of Object.entries(points)) await page.fill(`[data-pts="${p}"]`, String(v));
   await page.click('[data-act="save-game"]');
 }
-await page.click('[data-act="start-game"]');
+await page.click('[data-act="start-game"], [data-act="open-live"]');
 check(await page.isDisabled('[data-act="save-game"]'), 'cannot save a game with no winner');
 await shot('05-game-entry-empty');
 await page.click('[data-act="set-win"][data-p="julia"][data-k="cut"]');

@@ -28,7 +28,7 @@ async function session(ph, games){
   if(await ph.p.isVisible('[data-act="seat-last"]')) await ph.p.click('[data-act="seat-last"]');
   await ph.p.click('[data-act="seat-save"]');
   for(const g of games){
-    await ph.p.click('[data-act="start-game"]');
+    await ph.p.click('[data-act="start-game"], [data-act="open-live"]');
     await ph.p.click(`[data-act="set-win"][data-p="${g.w}"][data-k="win"]`);
     for(const [q,v] of Object.entries(g.pts)) await ph.p.fill(`[data-pts="${q}"]`,String(v));
     await ph.p.click('[data-act="save-game"]');

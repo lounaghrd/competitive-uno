@@ -91,7 +91,7 @@ check(after===101, `re-import is idempotent (${after} games)`);
 // new games continue on top of the history
 await page.click('[data-tab="session"]'); await page.click('[data-act="new-session"]');
 await page.click('[data-act="seat-last"]'); await page.click('[data-act="seat-save"]');
-await page.click('[data-act="start-game"]');
+await page.click('[data-act="start-game"], [data-act="open-live"]');
 await page.click('[data-act="set-win"][data-p="tom"][data-k="win"]');
 await page.fill('[data-pts="nathan"]','26');
 await page.click('[data-act="save-game"]');

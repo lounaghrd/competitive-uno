@@ -253,7 +253,7 @@ var P = {};
 PLAYERS.forEach(function(p){ p.age = THIS_YEAR - p.born; p.yearBonus = -10 * p.age; P[p.id] = p; });
 var IDS = PLAYERS.map(function(p){ return p.id; });
 var STORE = "uno-roadtrip-v1";
-var APP_VERSION = "2026-08-20k";
+var APP_VERSION = "2026-08-20l";
 
 /* ============================ state ============================ */
 var lastSaved = null;      /* must precede load(), which fills it in */
@@ -284,6 +284,7 @@ function toRecords(st){
         id:g.id, sessionId:sess.id, ord: g.ord != null ? g.ord : gi + 1,
         startedAt:g.startedAt || null, endedAt:g.endedAt || null,
         starter:g.starter || null, entries:g.entries,
+        autoStarted: !!g.autoStarted,
         imported:!!g.imported, updatedAt:g.updatedAt || 0
       };
     });
@@ -319,6 +320,24 @@ function fromRecords(r, prev){
   return { version:2, opening:r.opening || {}, sessions:sessions, seeded:true, tombs:tombs };
 }
 
+function liveSnapshot(){
+  for(var i=0;i<state.sessions.length;i++){
+    var sess = state.sessions[i];
+    if(sess.live) return { sessionId:sess.id, game:sess.live };
+  }
+  return null;
+}
+function restoreLive(st, live){
+  if(!live) return st;
+  for(var i=0;i<st.sessions.length;i++){
+    if(st.sessions[i].id === live.sessionId && !st.sessions[i].endedAt){
+      st.sessions[i].live = live.game;
+      break;
+    }
+  }
+  return st;
+}
+
 function load(){ return adopt(loadStored()); }
 function loadStored(){
   try {
@@ -326,7 +345,7 @@ function loadStored(){
     if(!raw) return blank();
     var s = JSON.parse(raw);
     if(!s) return blank();
-    if(s.records) return fromRecords(s.records, null);
+    if(s.records) return restoreLive(fromRecords(s.records, null), s.live);
     if(!Array.isArray(s.sessions)) return blank();
     if(!s.opening) s.opening = {};        /* a v1 save from before sync existed */
     if(!s.tombs) s.tombs = {};
@@ -367,7 +386,7 @@ function save(){
   var recs = toRecords(state);
   var changed = stampChanges(recs);
   applyStamps(recs);
-  try { localStorage.setItem(STORE, JSON.stringify({ version:2, records:recs })); }
+  try { localStorage.setItem(STORE, JSON.stringify({ version:2, records:recs, live:liveSnapshot() })); }
   catch(e){ toast("Couldn't save — phone storage is full"); }
   lastSaved = JSON.parse(JSON.stringify(recs));
   Sync.push(changed);
@@ -400,7 +419,7 @@ function mergeRemote(remote){
   if(!touched) return false;
   state = fromRecords(mine, state);
   lastSaved = JSON.parse(JSON.stringify(toRecords(state)));
-  try { localStorage.setItem(STORE, JSON.stringify({ version:2, records:lastSaved })); } catch(e){}
+  try { localStorage.setItem(STORE, JSON.stringify({ version:2, records:lastSaved, live:liveSnapshot() })); } catch(e){}
   return true;
 }
 function plural(n, word){ return n + " " + word + (n === 1 ? "" : "s"); }
@@ -822,7 +841,13 @@ function viewSession(c, sess){
     + '</div>'
     + '<div style="margin-top:12px"></div>'
     + (sess.live
-        ? '<button class="btn primary big" data-act="open-live">Enter results →</button>'
+        ? '<button class="btn primary big" data-act="open-live">Game '+(sess.games.length+1)
+          + ' · <span class="timer" id="btntimer">'+dur(Date.now()-sess.live.startedAt)+'</span>'
+          + ' <span style="opacity:.75">— enter results ›</span></button>'
+          + '<button class="btn ghost" style="margin-top:10px" data-act="restart-clock">Restart the clock</button>'
+          + '<div class="note">'+(sess.live.autoStarted
+              ? 'Running since the last game ended. Restart it if you stopped for a while.'
+              : 'Running since you started it.')+'</div>'
         : '<button class="btn primary big" data-act="start-game">Start game '+(sess.games.length+1)+'</button>')
     + '<div class="row2" style="margin-top:10px">'
     + '<button class="btn ghost" data-act="reseat">Change seats</button>'
@@ -1334,7 +1359,7 @@ function viewData(c){
 function toCSV(c){
   var head = ["session","session_start","game_no","game_in_session","game_start","game_end","game_seconds",
     "player","seat","starter","players_at_table","left_neighbour","right_neighbour",
-    "result","raw_points","bonus","net_change","total_after","game_average"];
+    "result","raw_points","bonus","net_change","total_after","game_average","clock_auto_started"];
   var lines = [head.join(",")];
   var running = {}; IDS.forEach(function(id){ running[id] = (state.opening && state.opening[id]) || 0; });
 
@@ -1358,7 +1383,8 @@ function toCSV(c){
         g.starter ? (g.starter === id ? "yes" : "no") : "",
         seating.length,
         left ? P[left].name : "", right ? P[right].name : "",
-        e.kind, base, bonus, base + bonus, running[id], fmtAvg(gameAverage(g))
+        e.kind, base, bonus, base + bonus, running[id], fmtAvg(gameAverage(g)),
+        g.autoStarted === undefined ? "" : (g.autoStarted ? "yes" : "no")
       ].join(","));
     });
   });
@@ -1431,7 +1457,9 @@ document.addEventListener("click", function(ev){
   if(act === "seat-save"){
     if(!sess || ui.draftSeat.length < 2) return;
     sess.seating = ui.draftSeat.slice();
-    ui.draftSeat = null; save(); render(); return;
+    ui.draftSeat = null;
+    if(!sess.live) beginNextGame(sess);
+    save(); render(); return;
   }
   if(act === "reseat"){ ui.draftSeat = sess.seating.slice(); sess.seating = null; save(); render(); return; }
   if(act === "end-session"){
@@ -1440,14 +1468,15 @@ document.addEventListener("click", function(ev){
   }
 
   if(act === "start-game" || act === "open-live"){
-    var c = compute();
-    if(act === "start-game"){
-      sess.live = { id:uid(), ord:Date.now(), startedAt:Date.now(), endedAt:null,
-        starter:suggestStarter(sess.seating, c.totals), entries:{} };
-      save();
-    }
+    if(!sess.live){ beginNextGame(sess); save(); }
     ui.editing = { game:sess.live, seating:sess.seating, isNew:true };
     ui.tab = "session"; render(); return;
+  }
+  if(act === "restart-clock"){
+    if(!sess || !sess.live) return;
+    sess.live.startedAt = Date.now();
+    sess.live.autoStarted = false;
+    save(); render(); toast("Clock restarted"); return;
   }
   if(act === "open-session"){ ui.openSession = el.dataset.s; ui.tab = "session"; render(); return; }
   if(act === "close-session"){ ui.openSession = null; render(); return; }
@@ -1568,6 +1597,25 @@ function readInputs(){
   });
 }
 
+/* The next game's clock starts the moment the last one is recorded, because
+   nobody remembers to press start. That means the span covers dealing and
+   scoring as well as play - which is the honest reading of "how long a round
+   takes", and it is at least consistent. A long break is the one thing that
+   distorts it, so the clock can be restarted by hand, and every game records
+   whether it began on its own. */
+function beginNextGame(sess){
+  var prev = sess.games[sess.games.length - 1];
+  var auto = !!(prev && prev.endedAt);
+  sess.live = {
+    id: uid(), ord: Date.now(),
+    startedAt: auto ? prev.endedAt : Date.now(),
+    endedAt: null, autoStarted: auto,
+    starter: suggestStarter(sess.seating, compute().totals),
+    entries: {}
+  };
+  return sess.live;
+}
+
 function saveGame(){
   readInputs();
   var ed = ui.editing, g = ed.game, sess = editSession();
@@ -1580,6 +1628,7 @@ function saveGame(){
     g.endedAt = Date.now();
     sess.games.push(g);
     sess.live = false;
+    if(!sess.endedAt) beginNextGame(sess);
   } else {
     sess.games[ed.index] = g;
   }
@@ -1618,6 +1667,8 @@ function tickTimer(){
     var d = dur(Date.now() - sess.live.startedAt);
     if(el) el.textContent = d;
     if(gt && ui.editing && ui.editing.isNew) gt.textContent = d + " ELAPSED";
+    var bt = document.getElementById("btntimer");
+    if(bt) bt.textContent = d;
   }
 }
 setInterval(tickTimer, 1000);

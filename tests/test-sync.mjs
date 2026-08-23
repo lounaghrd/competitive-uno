@@ -35,7 +35,7 @@ async function playGame(ph, winner, pts){
     await ph.p.click('[data-act="seat-save"]');
   }
   await ph.p.click('[data-tab="session"]');
-  await ph.p.click('[data-act="start-game"]');
+  await ph.p.click('[data-act="start-game"], [data-act="open-live"]');
   await ph.p.click(`[data-act="set-win"][data-p="${winner}"][data-k="win"]`);
   for (const [q,v] of Object.entries(pts)) await ph.p.fill(`[data-pts="${q}"]`, String(v));
   await ph.p.click('[data-act="save-game"]');

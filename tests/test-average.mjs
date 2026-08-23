@@ -53,7 +53,7 @@ await p.click('[data-act="close-session"]').catch(()=>{});
 await p.click('[data-act="new-session"]');
 if(await p.isVisible('[data-act="seat-last"]')) await p.click('[data-act="seat-last"]');
 await p.click('[data-act="seat-save"]');
-await p.click('[data-act="start-game"]');
+await p.click('[data-act="start-game"], [data-act="open-live"]');
 await p.click('[data-act="set-win"][data-p="tom"][data-k="win"]');
 for(const [q,v] of Object.entries({nathan:30,louna:20,andy:10,julia:40,justin:50,nicolas:60}))
   await p.fill(`[data-pts="${q}"]`,String(v));
@@ -66,8 +66,11 @@ await p.screenshot({path:'tests/shots/A-avg-toast.png'});
 // the export carries it too
 const dl = await Promise.all([p.waitForEvent('download'), p.click('[data-tab="data"]').then(()=>p.click('[data-act="export-csv"]'))]);
 const csv = fs.readFileSync(await dl[0].path(),'utf8').trim().split('\n');
-check(csv[0].endsWith('game_average'), 'the spreadsheet export has a game_average column');
-check(csv[1].split(',').pop()==='14.8', `and the first game reads 14.8 (${csv[1].split(',').pop()})`);
+/* look the column up by name — its position moves as columns are added */
+const cols = csv[0].split(',');
+const iAvg = cols.indexOf('game_average');
+check(iAvg !== -1, 'the spreadsheet export has a game_average column');
+check(csv[1].split(',')[iAvg]==='14.8', `and the first game reads 14.8 (${csv[1].split(',')[iAvg]})`);
 
 if(errs.length){ fail++; console.log('FAIL  page errors: '+errs.join(' | ')); }
 await b.close();

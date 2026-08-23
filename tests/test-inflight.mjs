@@ -15,7 +15,7 @@ await p.click('[data-tab="session"]'); await p.click('[data-act="new-session"]')
 if(await p.isVisible('[data-act="seat-last"]')) await p.click('[data-act="seat-last"]');
 await p.click('[data-act="seat-save"]');
 async function play(w){
-  await p.click('[data-act="start-game"]');
+  await p.click('[data-act="start-game"], [data-act="open-live"]');
   await p.click(`[data-act="set-win"][data-p="${w}"][data-k="win"]`);
   await p.click('[data-act="save-game"]');
 }

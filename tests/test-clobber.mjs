@@ -25,7 +25,7 @@ await settle(A,B);
 await A.p.click('[data-tab="session"]'); await A.p.click('[data-act="new-session"]');
 if(await A.p.isVisible('[data-act="seat-last"]')) await A.p.click('[data-act="seat-last"]');
 await A.p.click('[data-act="seat-save"]');
-await A.p.click('[data-act="start-game"]');
+await A.p.click('[data-act="start-game"], [data-act="open-live"]');
 await A.p.click('[data-act="set-win"][data-p="tom"][data-k="win"]');
 await A.p.fill('[data-pts="nathan"]','50');
 await A.p.click('[data-act="save-game"]');
@@ -48,7 +48,7 @@ const corrected = (await A.p.evaluate(()=>window.compute().totals)).nathan;
 
 // B, still holding the old score, records a completely unrelated new game
 await B.p.click('[data-tab="session"]');
-await B.p.click('[data-act="start-game"]');
+await B.p.click('[data-act="start-game"], [data-act="open-live"]');
 await B.p.click('[data-act="set-win"][data-p="julia"][data-k="win"]');
 await B.p.click('[data-act="save-game"]');
 
